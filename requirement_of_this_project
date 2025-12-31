@@ -1,0 +1,286 @@
+Perfect 👍 that clarifies the **most important constraint**:
+👉 **Mobile-first, touch-friendly, fun, zero-friction experience**.
+I’ll now give you a **FINAL, REFINED, MOBILE-OPTIMIZED MASTER PROMPT** that **fixes UX gaps**, **prevents chaos**, and ensures the game feels **smooth + exciting on phones**.
+
+You can use **this single prompt** to generate the whole project cleanly.
+
+---
+
+# 📱 FINAL MASTER PROMPT
+
+## IPL MEGA AUCTION – MOBILE-FIRST PRIVATE WEB GAME
+
+---
+
+## ROLE
+
+You are a **Mobile-First Product Designer + Senior Frontend Architect + Game Logic Engineer**.
+
+Your task is to **build a fully functional, mobile-optimized IPL Mega Auction Web App** for friends to play together online.
+
+This is a **fun private game**, not commercial.
+
+---
+
+## CORE NON-NEGOTIABLES
+
+* 📱 **Mobile-first UI** (thumb-friendly)
+* 🧭 No login / no OTP / no backend auth
+* ⚡ Fast load, no heavy animations
+* 👆 Touch-optimized buttons (no tiny clicks)
+* 📴 Works even if user refreshes accidentally
+* 💾 Uses `localStorage + sessionStorage` only
+* 🧠 Simple rules but realistic auction feel
+
+---
+
+## TECH STACK (LOCKED)
+
+* **Frontend**: React (Vite or Next.js App Router)
+* **Styling**: Tailwind CSS (mobile-first)
+* **State**: Zustand or Context
+* **Persistence**: localStorage / sessionStorage
+* **No images** – text & icons only
+* **All players data via JSON**
+
+---
+
+## 🎮 GAME CONCEPT
+
+A **private IPL Mega Auction room** where friends join via **Room Code**, select teams, bid on players, use RTM, chat, and finally generate **Playing XI + Impact Sub** and share results.
+
+---
+
+## 🧩 CORE FEATURES (MOBILE-FOCUSED)
+
+---
+
+### 1️⃣ LANDING (1 SCREEN ONLY)
+
+* App title
+* “Create Room” button
+* “Join Room” button
+* Auto-resume last room if exists
+
+> No clutter, no scrolling
+
+---
+
+### 2️⃣ ROOM CREATION
+
+* Enter:
+
+  * Display Name
+  * Create Room
+* Auto-generate:
+
+  * 6-char Room Code
+* Save room info in localStorage
+
+---
+
+### 3️⃣ JOIN ROOM
+
+* Enter:
+
+  * Name
+  * Room Code
+* Validate room locally
+* Auto restore if user returns
+
+---
+
+### 4️⃣ TEAM SELECTION (SCROLL-FREE GRID)
+
+* Show **10 IPL teams**
+* One tap to select
+* Lock after selection
+* Show who picked which team
+
+Teams:
+
+```json
+["CSK","MI","RCB","KKR","SRH","RR","DC","LSG","GT","PBKS"]
+```
+
+---
+
+## 💰 AUCTION RULES (ENFORCED IN CODE)
+
+| Rule         | Value                    |
+| ------------ | ------------------------ |
+| Total Purse  | ₹120 Cr                  |
+| Squad Min    | 18                       |
+| Squad Max    | 25                       |
+| Overseas Max | 8                        |
+| RTM          | Yes (Mega Auction style) |
+
+---
+
+### 🔁 RTM LOGIC (IMPORTANT)
+
+* RTM allowed **only** for player’s previous team
+* RTM popup appears automatically
+* If RTM used:
+
+  * Current bidder must increase bid
+  * Else RTM team wins player
+
+---
+
+## 🧍 PLAYER DATA (JSON ONLY)
+
+```json
+{
+  "id": "P023",
+  "name": "Hardik Pandya",
+  "role": "All-Rounder",
+  "country": "India",
+  "basePrice": 15000000,
+  "isOverseas": false,
+  "previousTeam": "MI",
+  "stats": {
+    "matches": 123,
+    "runs": 2309,
+    "wickets": 53
+  }
+}
+```
+
+No photos. No clutter.
+
+---
+
+## 📱 AUCTION SCREEN (MOST IMPORTANT)
+
+### Layout (Mobile)
+
+```
+-------------------------
+ Player Card (Top)
+-------------------------
+ Current Bid + Team
+-------------------------
+ BIG BID BUTTONS
+ [+25L] [+50L] [+1Cr]
+-------------------------
+ RTM Status (Auto)
+-------------------------
+ Team Dashboard (Swipe)
+-------------------------
+ Chat (Bottom Sheet)
+```
+
+### UX Rules
+
+* One action per screen
+* Big buttons
+* Sticky bid panel
+* Vibrations / highlights on bid
+
+---
+
+## 📊 LIVE DASHBOARD (SWIPEABLE)
+
+For each team:
+
+* Purse left
+* Players bought
+* Overseas count
+* Slots remaining
+
+---
+
+## 💬 CHAT (FUN ONLY)
+
+* Short messages
+* Emojis allowed
+* System messages auto-inserted:
+
+  * “🔥 RCB used RTM”
+  * “💰 MI won player for 12.5 Cr”
+
+---
+
+## 🧠 GAME SAFETY LOGIC
+
+* Prevent bid if:
+
+  * Purse exceeded
+  * Squad full
+  * Overseas limit exceeded
+* Warn visually (red shake)
+
+---
+
+## 🧾 AUCTION SUMMARY (FINAL SCREEN)
+
+* Team-wise squad
+* Total spent
+* Playing XI selection
+* Impact Sub
+
+---
+
+## 📤 SHARE & SAVE
+
+* Generate:
+
+  * Team Summary Card
+  * Playing XI
+* Export as:
+
+  * Image
+  * JSON
+* Shareable text (WhatsApp friendly)
+
+---
+
+## 🗂 STATE STRUCTURE (CLIENT-SIDE)
+
+```json
+{
+  "room": {},
+  "currentUser": {},
+  "teams": {},
+  "players": [],
+  "auction": {},
+  "chat": []
+}
+```
+
+---
+
+## 🏗 OUTPUT REQUIRED
+
+Generate:
+
+1. Folder structure
+2. React components (mobile-first)
+3. Zustand store
+4. Auction engine
+5. RTM logic
+6. Players JSON (60–100 players)
+7. UI screens
+8. Run instructions
+
+---
+
+## 🧪 QUALITY CHECK
+
+* Works smoothly on mobile
+* No accidental mis-taps
+* No UI clutter
+* Clear auction flow
+* Fun & fast
+
+---
+
+## 🚀 FINAL COMMAND
+
+> **Build the complete mobile-first IPL Mega Auction Web App now.
+> Do not ask questions.
+> Start generating code and structure step-by-step.**
+
+---
+

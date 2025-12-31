@@ -1,0 +1,574 @@
+import { useState, useEffect, useRef } from 'react';
+import { useAuctionStore } from '../store/auctionStore';
+
+export default function Auction({ onNavigate }) {
+    const [activeTab, setActiveTab] = useState('chat');
+    const [viewTeam, setViewTeam] = useState(null); // Local filter for Squad tab
+    const [showTeamDropdown, setShowTeamDropdown] = useState(false); // Custom dropdown toggle
+    const [chatInput, setChatInput] = useState('');
+    const [showSetModal, setShowSetModal] = useState(false);
+    const [setTab, setSetTab] = useState('upcoming'); // upcoming | sold | unsold
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+    const room = useAuctionStore((state) => state.room);
+    const currentUser = useAuctionStore((state) => state.currentUser);
+    const teams = useAuctionStore((state) => state.teams);
+    const shuffledPool = useAuctionStore((state) => state.shuffledPool);
+    const currentPlayerIndex = useAuctionStore((state) => state.currentPlayerIndex);
+    const currentBid = useAuctionStore((state) => state.currentBid);
+    const timer = useAuctionStore((state) => state.timer);
+    const timerDuration = useAuctionStore((state) => state.timerDuration);
+    const activity = useAuctionStore((state) => state.activity);
+    const onlineUsers = useAuctionStore((state) => state.onlineUsers);
+    const isConnected = useAuctionStore((state) => state.isConnected);
+
+    const placeBid = useAuctionStore((state) => state.placeBid);
+    const addChat = useAuctionStore((state) => state.addChat);
+    const updateSettings = useAuctionStore((state) => state.updateSettings);
+    const startGame = useAuctionStore((state) => state.startGame);
+    const togglePause = useAuctionStore((state) => state.togglePause);
+
+    const scrollRef = useRef(null);
+    const currentPlayer = shuffledPool[currentPlayerIndex];
+    const upcomingPlayers = shuffledPool.slice(currentPlayerIndex + 1, currentPlayerIndex + 6);
+    const myTeam = teams[currentUser?.team];
+    const isAdmin = currentUser?.name === room?.creator;
+    const isLive = room?.status === 'LIVE';
+    const isPaused = room?.isPaused;
+
+    useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    }, [activity]);
+
+    useEffect(() => {
+        if (!currentUser?.team) {
+            onNavigate('team-selection');
+        } else if (!viewTeam) {
+            setViewTeam(currentUser.team);
+        }
+    }, [currentUser?.team, onNavigate, viewTeam]);
+
+    const handleBid = () => {
+        if (!currentPlayer || !isLive || isPaused) return;
+        const res = placeBid(currentPlayer);
+        if (res?.success === false) alert(res.reason);
+    };
+
+    const handleStartGame = () => {
+        startGame();
+    };
+
+    const handleSendChat = () => {
+        if (!chatInput.trim()) return;
+        addChat(chatInput);
+        setChatInput('');
+    };
+
+    const formatPrice = (price) => {
+        if (!price) return '₹0';
+        if (price < 10000000) return `₹${(price / 100000).toFixed(0)}L`;
+        return `₹${(price / 10000000).toFixed(2)}Cr`;
+    };
+
+    const getNextBidUI = () => {
+        if (!currentPlayer) return '0.00 Cr';
+        const amount = currentBid?.amount || (currentPlayer.basePrice - 2000000);
+        let next;
+        if (!currentBid) next = currentPlayer.basePrice;
+        else if (amount < 50000000) next = amount + 2000000;
+        else if (amount < 100000000) next = amount + 5000000;
+        else next = amount + 10000000;
+        return formatPrice(next);
+    };
+
+    if (!currentUser?.team) return null;
+
+    // Game Over Screen
+    if (!currentPlayer) {
+        return (
+            <div className="h-screen bg-black flex flex-col items-center justify-center text-white p-4 text-center">
+                <h1 className="text-4xl font-black italic uppercase mb-2">Auction Concluded</h1>
+                <p className="text-white/40 mb-6 uppercase text-xs tracking-widest">All sets finished</p>
+                <button
+                    onClick={() => onNavigate('summary')}
+                    className="px-8 py-4 bg-emerald-600 rounded-2xl font-black uppercase tracking-widest text-xs"
+                >
+                    Generate Report
+                </button>
+            </div>
+        )
+    }
+
+    return (
+        <div className="h-screen w-screen bg-black text-white font-sans flex flex-col overflow-hidden fixed inset-0">
+
+            {/* HEADER: Admin Controls in Top Bar */}
+            <div className="h-12 flex items-center justify-between px-3 bg-[#0a0a0a] border-b border-white/5 shrink-0 z-20">
+                <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500 animate-pulse'}`}></div>
+                    <span className="text-amber-500 font-black tracking-widest text-[10px] uppercase">Room {room?.code}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-lg border border-white/5">
+                        <span className="text-[9px] uppercase font-bold text-white/40 tracking-wider">Online</span>
+                        <span className="text-[10px] font-black text-emerald-500">{onlineUsers.length}</span>
+                    </div>
+
+                    {isAdmin && (
+                        <div className="flex items-center gap-2 border-l border-white/10 pl-2 ml-1">
+                            {!isLive ? (
+                                <button
+                                    onClick={handleStartGame}
+                                    className="px-3 py-1 bg-emerald-600 rounded-md text-[10px] font-black uppercase tracking-widest shadow-[0_0_10px_#10b98150] animate-pulse"
+                                >
+                                    Start
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => togglePause(isPaused)}
+                                    className={`w-6 h-6 rounded-md flex items-center justify-center border ${isPaused ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500' : 'bg-amber-500/20 border-amber-500 text-amber-500'}`}
+                                >
+                                    <span className="material-icons text-[10px] font-black">{isPaused ? '▶' : 'II'}</span>
+                                </button>
+                            )}
+                            <button onClick={() => setShowExitConfirm(true)} className="text-red-500 font-bold text-[10px] uppercase ml-1">End</button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* PLAYER CARD AREA - Clear View, No Overlay */}
+            <div className="p-3 bg-black shrink-0 relative z-10">
+                <div className="bg-[#111] rounded-2xl p-4 border border-white/5 relative overflow-hidden h-[200px] flex flex-col justify-between shadow-2xl">
+
+                    {/* Horizontal Timer Bar */}
+                    <div className="absolute top-0 left-0 w-full h-1 bg-white/5">
+                        <div
+                            className={`h-full transition-all duration-300 ease-linear ${isPaused ? 'bg-amber-500 w-full' : timer < 5 ? 'bg-red-600 shadow-[0_0_15px_#dc2626]' : 'bg-emerald-500'}`}
+                            style={{ width: isPaused || !isLive ? '100%' : `${(timer / timerDuration) * 100}%` }}
+                        ></div>
+                    </div>
+
+                    <div className="flex justify-between items-start mt-2">
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-black uppercase text-amber-500 tracking-widest mb-1">{currentPlayer.role}</span>
+                            <span className="text-[8px] font-bold uppercase text-white/30 tracking-[3px]">{currentPlayer.country}</span>
+                        </div>
+
+                        {/* Status Badge */}
+                        {isLive ? (
+                            <div className="w-10 h-10 rounded-xl bg-[#050505] border border-white/10 flex items-center justify-center">
+                                <span className={`text-xl font-black ${isPaused ? 'text-amber-500' : timer < 5 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                    {isPaused ? 'II' : timer}
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded text-[9px] font-bold text-emerald-500 uppercase tracking-widest animate-pulse">
+                                LOBBY
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="text-center transform -translate-y-2">
+                        <h2 className="text-[32px] font-black uppercase italic leading-[0.9] tracking-tighter truncate px-2">{currentPlayer.name}</h2>
+                    </div>
+
+                    <div className="flex justify-between items-end border-t border-white/5 pt-3">
+                        <div>
+                            <p className="text-[8px] uppercase text-white/20 tracking-wider font-bold">Base Price</p>
+                            <p className="text-lg font-black leading-none mt-0.5">{formatPrice(currentPlayer.basePrice)}</p>
+                        </div>
+                        {currentBid && isLive && (
+                            <div className="text-right animate-in slide-in-from-right duration-200">
+                                <p className="text-[8px] uppercase text-emerald-500 tracking-wider font-bold">Led By {currentBid.team}</p>
+                                <p className="text-2xl font-black text-emerald-400 leading-none mt-0.5">{formatPrice(currentBid.amount)}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* PAUSED OVERLAY ONLY (Not for Lobby) */}
+                    {isPaused && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20">
+                            <div className="text-center">
+                                <p className="text-[10px] uppercase font-bold text-amber-500 tracking-widest mb-2">Auction Paused</p>
+                                <p className="text-xs font-black uppercase text-white/50">Admin is reviewing...</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* QUICK STATS & BID BUTTON - Compact */}
+            <div className="px-3 shrink-0 pb-2 z-10">
+                <div className="flex justify-between items-center px-2 mb-2">
+                    <div className="flex flex-col">
+                        <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Remaining Purse</span>
+                        <span className="text-sm font-black text-emerald-400">{formatPrice(myTeam?.purse)}</span>
+                    </div>
+                    <div className="flex flex-col text-right">
+                        <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Squad Status</span>
+                        <span className="text-sm font-black text-white">{myTeam?.players.length} <span className="text-white/30">/ 25</span></span>
+                    </div>
+                </div>
+
+                <div className="flex gap-2 h-16">
+                    <button
+                        onClick={handleBid}
+                        disabled={!isLive || isPaused || (currentBid?.team === currentUser?.team)}
+                        className={`flex-1 rounded-xl relative overflow-hidden transition-all shadow-[0_0_40px_-5px_#10b98140] ${isLive && !isPaused && (currentBid?.team !== currentUser?.team) ? 'bg-emerald-600 active:scale-[0.98]' : 'bg-[#1a1a1a] grayscale opacity-50 cursor-not-allowed'}`}
+                    >
+                        <div className={`absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 ${(!isLive || isPaused || (currentBid?.team === currentUser?.team)) ? 'hidden' : ''}`}></div>
+                        <div className="relative flex flex-col items-center justify-center">
+                            <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
+                                {!isLive ? 'Waiting for Host' : isPaused ? 'Paused' : 'Make Offer'}
+                            </span>
+                            <span className={`text-2xl font-black italic uppercase leading-none tracking-tight ${!isLive || isPaused || (currentBid?.team === currentUser?.team) ? 'opacity-30' : ''}`}>
+                                Bid {getNextBidUI()}
+                            </span>
+                        </div>
+                    </button>
+                    <button
+                        onClick={() => setShowSetModal(true)}
+                        className="w-16 bg-[#181818] rounded-xl flex items-center justify-center border border-white/5 active:bg-[#222]"
+                    >
+                        <div className="flex flex-col gap-1.5 items-center opacity-40">
+                            <div className="w-5 h-0.5 bg-white rounded-full"></div>
+                            <div className="w-5 h-0.5 bg-white rounded-full"></div>
+                            <div className="w-5 h-0.5 bg-white rounded-full"></div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            {/* COMPACT TABS NAV */}
+            <div className="bg-[#050505] flex border-y border-white/5 shrink-0 z-10">
+                {['chat', 'squad', 'teams', 'settings'].map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        disabled={tab === 'settings' && !isAdmin}
+                        className={`flex-1 h-10 text-[9px] font-black uppercase tracking-[2px] transition-colors ${activeTab === tab ? 'text-amber-500 bg-white/5 border-b-2 border-amber-500' : tab === 'settings' && !isAdmin ? 'text-white/5 cursor-not-allowed' : 'text-white/20'}`}
+                    >
+                        {tab}
+                    </button>
+                ))}
+            </div>
+
+            {/* SCROLLABLE VIEWPORT - Hidden Scrollbar */}
+            <div className="flex-1 overflow-hidden relative bg-black w-full">
+
+                {/* CHAT TAB */}
+                {activeTab === 'chat' && (
+                    <div className="h-full flex flex-col inset-0 absolute">
+                        <div ref={scrollRef} className="flex-1 overflow-y-auto no-scrollbar p-3 flex flex-col-reverse gap-2">
+                            {activity.map((item, i) => (
+                                <div key={i} className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${item.user === currentUser.name ? 'items-end' : 'items-start'}`}>
+                                    {item.type === 'sold' ? (
+                                        <div className="w-full bg-[#111] border border-white/5 rounded-xl p-3 flex items-center justify-between mb-2 shadow-lg">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-xs">⚖️</div>
+                                                <div>
+                                                    <p className="text-[8px] uppercase text-white/30 leading-none mb-1 tracking-wider">Sold To {item.team}</p>
+                                                    <p className="text-xs font-black uppercase italic text-white">{item.player.name}</p>
+                                                </div>
+                                            </div>
+                                            <p className="text-sm font-black text-emerald-400">{formatPrice(item.player.soldPrice)}</p>
+                                        </div>
+                                    ) : item.type === 'system' ? (
+                                        <div className="text-[8px] uppercase font-bold text-white/20 text-center py-2 tracking-widest bg-white/[0.02] rounded my-1">
+                                            {item.text}
+                                        </div>
+                                    ) : item.type === 'bid' ? (
+                                        <div className="w-full flex items-center gap-2 opacity-40 my-0.5 px-2">
+                                            <div className="h-[1px] flex-1 bg-white/10"></div>
+                                            <p className="text-[8px] font-bold uppercase text-white/50">{item.team} bids {formatPrice(item.amount)}</p>
+                                            <div className="h-[1px] flex-1 bg-white/10"></div>
+                                        </div>
+                                    ) : (
+                                        <div className={`max-w-[85%] px-3 py-2 rounded-lg text-xs font-bold leading-relaxed ${item.user === currentUser.name ? 'bg-amber-600 text-white rounded-br-none' : 'bg-[#1a1a1a] text-white/70 rounded-bl-none'}`}>
+                                            <span className="text-[7px] mb-0.5 block opacity-50 uppercase tracking-wider">{item.user}</span>
+                                            {item.text}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-2 bg-[#0a0a0a] border-t border-white/5 flex gap-2 shrink-0">
+                            <input
+                                className="flex-1 bg-[#111] rounded-lg px-3 text-xs h-10 focus:ring-1 focus:ring-amber-500 outline-none font-bold"
+                                placeholder="COMMS CHANNEL..."
+                                value={chatInput}
+                                onChange={e => setChatInput(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleSendChat()}
+                            />
+                            <button onClick={handleSendChat} className="w-10 h-10 bg-[#222] rounded-lg flex items-center justify-center text-amber-500 active:bg-amber-600 active:text-white">➤</button>
+                        </div>
+                    </div>
+                )}
+
+                {/* TEAMS LAYOUT */}
+                {activeTab === 'teams' && (
+                    <div className="h-full overflow-y-auto no-scrollbar p-3">
+                        <div className="grid grid-cols-2 gap-2">
+                            {Object.values(teams).map(t => {
+                                const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline);
+                                return (
+                                    <div key={t.name} className="bg-[#111] p-3 rounded-xl border border-white/5 flex flex-col justify-between h-24 relative overflow-hidden">
+                                        {isOnline && <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>}
+                                        <span className="text-xl font-black uppercase text-white/10 absolute -bottom-2 -right-1">{t.name}</span>
+                                        <div>
+                                            <p className="text-lg font-black uppercase leading-none">{t.name}</p>
+                                            <p className="text-[8px] font-bold text-white/30 uppercase mt-1">{t.players.length} Players</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[7px] uppercase text-white/20 font-bold mb-0.5">Purse Left</p>
+                                            <p className="text-sm font-black text-emerald-500">{formatPrice(t.purse)}</p>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* SQUAD LAYOUT */}
+                {activeTab === 'squad' && (
+                    <div className="h-full flex flex-col">
+                        {/* Header: Selector & Stats */}
+                        <div className="p-3 bg-[#111] border-b border-white/5 shrink-0 space-y-3 z-10">
+                            <div className="relative">
+                                {/* Custom Trigger */}
+                                <button
+                                    onClick={() => setShowTeamDropdown(!showTeamDropdown)}
+                                    className="w-full bg-[#050505] border border-white/10 rounded-xl h-12 px-4 flex items-center justify-between font-black uppercase text-white hover:border-amber-500 transition-colors"
+                                >
+                                    <span>
+                                        {viewTeam}
+                                        {onlineUsers.some(u => u.team === viewTeam && u.isOnline)
+                                            ? <span className="text-emerald-500 ml-2 text-xs">●</span>
+                                            : <span className="text-red-500 ml-2 text-xs">●</span>}
+                                    </span>
+                                    <span className="text-amber-500 text-[10px]">▼</span>
+                                </button>
+
+                                {/* Dropdown Menu */}
+                                {showTeamDropdown && (
+                                    <div className="absolute top-14 left-0 w-full bg-[#111] border border-white/10 rounded-xl z-50 overflow-hidden shadow-2xl max-h-60 overflow-y-auto no-scrollbar">
+                                        {Object.values(teams).map(t => {
+                                            const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline);
+                                            return (
+                                                <button
+                                                    key={t.name}
+                                                    onClick={() => {
+                                                        setViewTeam(t.name);
+                                                        setShowTeamDropdown(false);
+                                                    }}
+                                                    className="w-full text-left px-4 py-3 hover:bg-white/5 font-bold uppercase text-sm border-b border-white/5 last:border-0 flex justify-between items-center"
+                                                >
+                                                    <span className={viewTeam === t.name ? 'text-amber-500' : 'text-white'}>{t.name}</span>
+                                                    {isOnline
+                                                        ? <span className="text-emerald-500 text-[8px] tracking-wider">ONLINE</span>
+                                                        : <span className="text-red-500 text-[8px] tracking-wider">OFFLINE</span>}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            {teams[viewTeam] && (
+                                <div className="grid grid-cols-4 gap-2">
+                                    <div className="bg-[#1a1a1a] rounded p-2 text-center flex flex-col justify-center border border-white/5">
+                                        <span className="text-[7px] font-bold uppercase text-white/30 tracking-wider mb-0.5">Players</span>
+                                        <span className="font-black text-xs text-white">{teams[viewTeam].players.length}<span className="text-white/20 text-[8px]">/25</span></span>
+                                    </div>
+                                    <div className="bg-[#1a1a1a] rounded p-2 text-center flex flex-col justify-center border border-white/5">
+                                        <span className="text-[7px] font-bold uppercase text-white/30 tracking-wider mb-0.5">Overseas</span>
+                                        <span className="font-black text-xs text-amber-500">{teams[viewTeam].overseasCount}<span className="text-white/20 text-[8px]">/8</span></span>
+                                    </div>
+                                    <div className="bg-[#1a1a1a] rounded p-2 text-center flex flex-col justify-center border border-white/5">
+                                        <span className="text-[7px] font-bold uppercase text-white/30 tracking-wider mb-0.5">Indian</span>
+                                        <span className="font-black text-xs text-blue-400">{teams[viewTeam].players.length - teams[viewTeam].overseasCount}</span>
+                                    </div>
+                                    <div className="bg-[#1a1a1a] rounded p-2 text-center flex flex-col justify-center border border-white/5">
+                                        <span className="text-[7px] font-bold uppercase text-white/30 tracking-wider mb-0.5">Spent</span>
+                                        <span className="font-black text-[10px] text-white leading-tight">{formatPrice(teams[viewTeam].totalSpent)}</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* List */}
+                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2">
+                            {teams[viewTeam]?.players.map((p, i) => (
+                                <div key={i} className="flex justify-between items-center p-3 bg-[#111] rounded-xl border border-white/5 animate-in slide-in-from-bottom-2 duration-300">
+                                    <div className="flex flex-col">
+                                        <span className="font-black text-xs uppercase text-white tracking-tight">{p.name}</span>
+                                        <div className="flex gap-2 mt-1">
+                                            <span className="text-[7px] font-bold uppercase text-black bg-white/50 px-1.5 py-0.5 rounded-sm tracking-wider">{p.role}</span>
+                                            <span className={`text-[7px] font-bold uppercase px-1.5 py-0.5 rounded-sm tracking-wider ${p.isOverseas ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}>
+                                                {p.country}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <span className="font-black text-xs text-emerald-400">{formatPrice(p.soldPrice)}</span>
+                                </div>
+                            ))}
+                            {teams[viewTeam]?.players.length === 0 && (
+                                <div className="h-full flex flex-col items-center justify-center opacity-20 pb-10">
+                                    <p className="font-black uppercase tracking-widest text-xs">No Acquisitions</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* SETTINGS - Admin Only */}
+                {activeTab === 'settings' && isAdmin && (
+                    <div className="h-full p-4 flex flex-col gap-6">
+                        <div className="bg-[#111] p-4 rounded-xl border border-white/5">
+                            <p className="text-[9px] font-black uppercase text-white/30 tracking-widest mb-3">Hammer Speed</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[10, 15, 20].map(s => (
+                                    <button
+                                        key={s}
+                                        onClick={() => updateSettings(s)}
+                                        className={`py-2 rounded-lg font-black text-xs border border-transparent ${timerDuration === s ? 'bg-amber-600 text-white' : 'bg-black text-white/30 border-white/10'}`}
+                                    >
+                                        {s}s
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-[#111] p-4 rounded-xl border border-white/5 opacity-50 pointer-events-none">
+                            <p className="text-[9px] font-black uppercase text-white/30 tracking-widest mb-3">Admin Rules</p>
+                            <p className="text-[10px] text-white/50">Only host can control the flow. Pause or End from the header.</p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* MODALS */}
+            {showSetModal && (
+                <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col p-6 animate-in fade-in duration-200">
+                    <div className="flex justify-between items-center mb-6 shrink-0">
+                        <div>
+                            <h3 className="text-3xl font-black italic uppercase tracking-tighter">Auction <span className="text-amber-500">Intel</span></h3>
+                            <p className="text-[9px] font-bold uppercase text-white/30 tracking-widest">Real-time Player Database</p>
+                        </div>
+                        <button onClick={() => setShowSetModal(false)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center font-bold hover:bg-white/20 transition-colors">✕</button>
+                    </div>
+
+                    {/* Modal Tabs */}
+                    <div className="flex border-b border-white/10 mb-4 shrink-0">
+                        {['upcoming', 'sold', 'unsold'].map(tab => (
+                            <button
+                                key={tab}
+                                onClick={() => setSetTab(tab)}
+                                className={`px-6 py-3 text-[10px] font-black uppercase tracking-[2px] transition-colors border-b-2 ${setTab === tab ? 'text-white border-amber-500' : 'text-white/30 border-transparent hover:text-white/60'}`}
+                            >
+                                {tab}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto no-scrollbar relative">
+                        {/* UPCOMING TAB */}
+                        {setTab === 'upcoming' && (
+                            <div className="space-y-6">
+                                {(() => {
+                                    // Group upcoming players by set
+                                    const upcoming = shuffledPool.slice(currentPlayerIndex + 1);
+                                    if (upcoming.length === 0) return <div className="text-white/30 text-center py-10 font-black uppercase text-xs tracking-widest">No players remaining</div>;
+
+                                    // Simple manual grouping to avoid complex Object.groupBy for compatibility
+                                    const grouped = {};
+                                    upcoming.forEach(p => {
+                                        const setKey = p.set || 'Unset';
+                                        if (!grouped[setKey]) grouped[setKey] = [];
+                                        grouped[setKey].push(p);
+                                    });
+
+                                    return Object.entries(grouped).map(([set, players]) => (
+                                        <div key={set}>
+                                            <h4 className="text-emerald-500 font-black text-xs uppercase tracking-widest mb-2 sticky top-0 bg-black/95 py-2 z-10">{set} ({players[0]?.category || 'Pool'})</h4>
+                                            <div className="space-y-2">
+                                                {players.map((p, i) => (
+                                                    <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center opacity-80 hover:opacity-100 hover:border-white/10 transition-all">
+                                                        <div>
+                                                            <p className="font-black text-sm uppercase">{p.name}</p>
+                                                            <p className="text-[8px] font-bold uppercase text-white/40">{p.role} • {p.country}</p>
+                                                        </div>
+                                                        <span className="text-xs font-bold text-white/30">{formatPrice(p.basePrice)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ));
+                                })()}
+                            </div>
+                        )}
+
+                        {/* SOLD TAB */}
+                        {setTab === 'sold' && (
+                            <div className="space-y-2">
+                                {(() => {
+                                    // Aggregate all sold players from teams
+                                    const allSold = Object.values(teams).flatMap(t => t.players).sort((a, b) => b.soldPrice - a.soldPrice);
+                                    if (allSold.length === 0) return <div className="text-white/30 text-center py-10 font-black uppercase text-xs tracking-widest">No players sold yet</div>;
+
+                                    return allSold.map((p, i) => (
+                                        <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center">
+                                            <div className="flex items-center gap-4">
+                                                <div className="font-black text-amber-500 text-lg w-8 text-center">{i + 1}</div>
+                                                <div>
+                                                    <p className="font-black text-sm uppercase">{p.name}</p>
+                                                    <p className="text-[8px] font-bold uppercase text-white/40">Sold to {p.winner}</p>
+                                                </div>
+                                            </div>
+                                            <span className="text-sm font-black text-emerald-400">{formatPrice(p.soldPrice)}</span>
+                                        </div>
+                                    ));
+                                })()}
+                            </div>
+                        )}
+
+                        {/* UNSOLD TAB */}
+                        {setTab === 'unsold' && (
+                            <div className="space-y-2">
+                                {(() => {
+                                    const unsold = room?.unsold || [];
+                                    if (unsold.length === 0) return <div className="text-white/30 text-center py-10 font-black uppercase text-xs tracking-widest">No unsold players</div>;
+
+                                    return unsold.map((p, i) => (
+                                        <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center opacity-60">
+                                            <div>
+                                                <p className="font-black text-sm uppercase text-red-400 line-through">{p.name}</p>
+                                                <p className="text-[8px] font-bold uppercase text-white/40">{p.role}</p>
+                                            </div>
+                                            <span className="text-xs font-bold text-white/20">{formatPrice(p.basePrice)}</span>
+                                        </div>
+                                    ));
+                                })()}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {showExitConfirm && (
+                <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-8">
+                    <div className="bg-[#151515] p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center shadow-2xl">
+                        <h3 className="text-lg font-black uppercase italic mb-2">Close Arena?</h3>
+                        <p className="text-xs text-white/40 mb-6">This will end the session for all commanders.</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => setShowExitConfirm(false)} className="py-3 rounded-xl bg-white/5 font-bold text-xs hover:bg-white/10">CANCEL</button>
+                            <button onClick={() => onNavigate('landing')} className="py-3 rounded-xl bg-red-600 font-bold text-xs hover:bg-red-700">CONFIRM</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
