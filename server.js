@@ -138,8 +138,21 @@ wss.on('connection', (ws) => {
 
             // Send safe room object (without timerInterval and WebSocket references)
             const safeRoom = getSafeRoom(rooms[code]);
+            
+            // Build playersList with accurate online status for room creator
+            const playersList = Object.entries(rooms[code].players || {}).map(([name, data]) => ({ 
+                name, 
+                team: data.team || null, 
+                isOnline: data.isOnline === true
+            }));
+            
             try {
-                ws.send(JSON.stringify({ type: 'ROOM_CREATED', code, room: safeRoom }));
+                ws.send(JSON.stringify({ 
+                    type: 'ROOM_CREATED', 
+                    code, 
+                    room: safeRoom,
+                    playersList 
+                }));
             } catch (error) {
                 console.error('Error sending ROOM_CREATED:', error.message);
                 ws.send(JSON.stringify({ type: 'ERROR', message: 'Failed to create room data' }));
@@ -158,16 +171,24 @@ wss.on('connection', (ws) => {
                 // Restore player's team if they had one (for this room)
                 // Timer continues running in background regardless of player connections
                 const existing = rooms[code].players[currentUser];
-                rooms[code].players[currentUser] = { ws, team: existing?.team || null, isOnline: true };
+                
+                // Update player status - mark as online when they join
+                rooms[code].players[currentUser] = { 
+                    ws, 
+                    team: existing?.team || null, 
+                    isOnline: true  // Always set to true when joining
+                };
 
                 // Send current room state including current timer value
                 // Player will see the game state as it is, even if they were disconnected
                 // Use safe room object (without timerInterval and WebSocket references)
                 const safeRoom = getSafeRoom(rooms[code]);
+                
+                // Build playersList with accurate online status
                 const playersList = Object.entries(rooms[code].players || {}).map(([name, data]) => ({ 
                     name, 
                     team: data.team || null, 
-                    isOnline: data.isOnline || false
+                    isOnline: data.isOnline === true  // Explicitly check for true
                 }));
                 
                 try {
@@ -180,6 +201,8 @@ wss.on('connection', (ws) => {
                     console.error('Error sending JOIN_SUCCESS:', error.message);
                     ws.send(JSON.stringify({ type: 'ERROR', message: 'Failed to send room data' }));
                 }
+                
+                // Broadcast update to all players so they see the new online status
                 broadcastRoomUpdate(code);
                 saveRooms(); // Save new player registration if we want to persist teams
             } else {
@@ -442,11 +465,13 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         try {
             if (currentRoom && rooms[currentRoom] && rooms[currentRoom].players[currentUser]) {
-                // Mark player as offline but DON'T stop the timer
+                // Mark player as offline immediately when WebSocket closes
                 // Timer continues running in the background regardless of player connections
                 rooms[currentRoom].players[currentUser].isOnline = false;
-                // Don't clear the WebSocket reference - keep it for reconnection
-                // rooms[currentRoom].players[currentUser].ws = null; // Keep for potential reconnection tracking
+                // Update WebSocket reference to null since connection is closed
+                rooms[currentRoom].players[currentUser].ws = null;
+                
+                // Broadcast update immediately so other players see the offline status
                 broadcastRoomUpdate(currentRoom);
                 // Timer continues - game proceeds even if all players disconnect
             }
@@ -663,12 +688,22 @@ function broadcastRoomUpdate(code) {
     if (!room) return;
     
     const safeRoom = getSafeRoom(room);
-    const playersList = Object.entries(room.players || {}).map(([name, data]) => ({ 
-        name, 
-        team: data.team || null, 
-        isOnline: data.isOnline || false,
-        // Exclude: ws (WebSocket object)
-    }));
+    
+    // Build accurate playersList with real-time online status
+    // Check WebSocket readyState to ensure accurate online status
+    const playersList = Object.entries(room.players || {}).map(([name, data]) => {
+        // Check if WebSocket is actually connected
+        const wsConnected = data.ws && data.ws.readyState === 1;
+        // isOnline should be true only if both flag is true AND WebSocket is connected
+        const isActuallyOnline = (data.isOnline === true) && wsConnected;
+        
+        return { 
+            name, 
+            team: data.team || null, 
+            isOnline: isActuallyOnline
+            // Exclude: ws (WebSocket object)
+        };
+    });
     
     broadcastToRoom(code, {
         type: 'STATE_UPDATE',

@@ -131,7 +131,7 @@ export default function Auction({ onNavigate }) {
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-lg border border-white/5">
                         <span className="text-[9px] uppercase font-bold text-white/40 tracking-wider">Online</span>
-                        <span className="text-[10px] font-black text-emerald-500">{onlineUsers.length}</span>
+                        <span className="text-[10px] font-black text-emerald-500">{onlineUsers.filter(u => u.isOnline).length}</span>
                     </div>
 
                     {isAdmin && (
@@ -362,10 +362,10 @@ export default function Auction({ onNavigate }) {
                     <div className="h-full overflow-y-auto no-scrollbar p-3">
                         <div className="grid grid-cols-2 gap-2">
                             {Object.values(teams).map(t => {
-                                const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline);
+                                const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline === true);
                                 return (
                                     <div key={t.name} className="bg-[#111] p-3 rounded-xl border border-white/5 flex flex-col justify-between h-24 relative overflow-hidden">
-                                        {isOnline && <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>}
+                                        {isOnline && <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>}
                                         <span className="text-xl font-black uppercase text-white/10 absolute -bottom-2 -right-1">{t.name}</span>
                                         <div>
                                             <p className="text-lg font-black uppercase leading-none">{t.name}</p>
@@ -403,8 +403,8 @@ export default function Auction({ onNavigate }) {
                                 >
                                     <span>
                                         {viewTeam}
-                                        {onlineUsers.some(u => u.team === viewTeam && u.isOnline)
-                                            ? <span className="text-emerald-500 ml-2 text-xs">●</span>
+                                        {onlineUsers.some(u => u.team === viewTeam && u.isOnline === true)
+                                            ? <span className="text-emerald-500 ml-2 text-xs animate-pulse">●</span>
                                             : <span className="text-red-500 ml-2 text-xs">●</span>}
                                     </span>
                                     <span className="text-amber-500 text-[10px]">▼</span>
@@ -414,7 +414,8 @@ export default function Auction({ onNavigate }) {
                                 {showTeamDropdown && (
                                     <div className="absolute top-14 left-0 w-full bg-[#111] border border-white/10 rounded-xl z-50 overflow-hidden shadow-2xl max-h-60 overflow-y-auto no-scrollbar">
                                         {Object.values(teams).map(t => {
-                                            const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline);
+                                            const isOnline = onlineUsers.some(u => u.team === t.name && u.isOnline === true);
+                                            const onlineCount = onlineUsers.filter(u => u.team === t.name && u.isOnline === true).length;
                                             return (
                                                 <button
                                                     key={t.name}
@@ -426,7 +427,10 @@ export default function Auction({ onNavigate }) {
                                                 >
                                                     <span className={viewTeam === t.name ? 'text-amber-500' : 'text-white'}>{t.name}</span>
                                                     {isOnline
-                                                        ? <span className="text-emerald-500 text-[8px] tracking-wider">ONLINE</span>
+                                                        ? <span className="text-emerald-500 text-[8px] tracking-wider flex items-center gap-1">
+                                                            <span className="w-1 h-1 rounded-full bg-emerald-500"></span>
+                                                            ONLINE {onlineCount > 1 ? `(${onlineCount})` : ''}
+                                                        </span>
                                                         : <span className="text-red-500 text-[8px] tracking-wider">OFFLINE</span>}
                                                 </button>
                                             )

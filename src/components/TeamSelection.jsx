@@ -191,7 +191,8 @@ export default function TeamSelection({ onNavigate }) {
             <div className="flex-1 overflow-y-auto no-scrollbar space-y-2 pb-20">
                 {useAuctionStore.getState().IPL_TEAMS.map((teamId) => {
                     const teamData = teams[teamId];
-                    const takenBy = onlineUsers.find(u => u.team === teamId && u.name !== currentUser?.name);
+                    // Only consider players who are actually online
+                    const takenBy = onlineUsers.find(u => u.team === teamId && u.name !== currentUser?.name && u.isOnline === true);
                     const isTaken = !!takenBy;
                     const isSelected = selected === teamId;
 
@@ -214,7 +215,12 @@ export default function TeamSelection({ onNavigate }) {
                                 ></div>
                                 <div className="text-left">
                                     <span className="font-black text-lg uppercase leading-none block">{teamData.name}</span>
-                                    {isTaken && <span className="text-[8px] uppercase font-bold tracking-widest text-red-500">Taken by {takenBy.name}</span>}
+                                    {isTaken && (
+                                        <div className="flex items-center gap-1 mt-0.5">
+                                            <span className="text-[8px] uppercase font-bold tracking-widest text-red-500">Taken by {takenBy.name}</span>
+                                            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             {isSelected && <span className="font-black text-lg text-black">✓</span>}
