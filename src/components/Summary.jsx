@@ -9,6 +9,7 @@ export default function Summary({ onNavigate }) {
 
     const teams = useAuctionStore((state) => state.teams);
     const currentUser = useAuctionStore((state) => state.currentUser);
+    const room = useAuctionStore((state) => state.room);
     const showNotification = useAuctionStore((state) => state.showNotification);
     const confirmAction = useAuctionStore((state) => state.confirmAction);
     const reset = useAuctionStore((state) => state.reset);
@@ -35,9 +36,11 @@ export default function Summary({ onNavigate }) {
     const selectedTeam = teams[activeTeamName];
 
     const handleExit = () => {
-        confirmAction('Permanently close this session and reset stats?', () => {
+        confirmAction('Reset session? You can still access all rooms from Recent games.', () => {
             reset();
             onNavigate('landing');
+            // Update URL to landing
+            window.history.pushState({}, '', '/');
         });
     };
 
@@ -128,8 +131,20 @@ export default function Summary({ onNavigate }) {
                     <div className="grid grid-cols-2 gap-4">
                         {selectedTeam?.players.sort((a, b) => b.soldPrice - a.soldPrice).map((p, i) => (
                             <div key={i} className="flex justify-between items-center p-6 bg-white/[0.03] border border-white/5 rounded-[2rem]">
-                                <div className="overflow-hidden mr-4">
-                                    <p className="font-black text-xl uppercase italic leading-none mb-1 truncate">{p.name} {p.isRTM && <span className="text-xs text-amber-500 ml-2">RTM</span>}</p>
+                                <div className="overflow-hidden mr-4 flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <p className="font-black text-xl uppercase italic leading-none truncate">{p.name}</p>
+                                        {p.isRetained && (
+                                            <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[8px] font-black uppercase text-amber-500 shrink-0">
+                                                RETAINED
+                                            </span>
+                                        )}
+                                        {p.isRTM && !p.isRetained && (
+                                            <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[8px] font-black uppercase text-amber-500 shrink-0">
+                                                RTM
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="text-xs font-bold text-white/20 uppercase tracking-widest">{p.role}</p>
                                 </div>
                                 <p className="font-black text-amber-500 text-xl tracking-tighter shrink-0">{formatPrice(p.soldPrice)}</p>
@@ -164,14 +179,18 @@ export default function Summary({ onNavigate }) {
             {view === 'overview' ? (
                 <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar animate-in zoom-in-95 duration-300 pb-10">
                     {/* Global Cards */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-[#111] border border-white/5 p-4 rounded-3xl">
-                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1">Total Valuation</p>
-                            <p className="text-lg font-black text-emerald-400">{formatPrice(totalSpent)}</p>
+                    <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-[#111] border border-white/5 p-3 rounded-2xl">
+                            <p className="text-[7px] font-black text-white/20 uppercase tracking-widest mb-1">Total Valuation</p>
+                            <p className="text-sm font-black text-emerald-400">{formatPrice(totalSpent)}</p>
                         </div>
-                        <div className="bg-[#111] border border-white/5 p-4 rounded-3xl">
-                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1">Players Sold</p>
-                            <p className="text-lg font-black text-white">{allPlayers.length}</p>
+                        <div className="bg-[#111] border border-white/5 p-3 rounded-2xl">
+                            <p className="text-[7px] font-black text-white/20 uppercase tracking-widest mb-1">Players Sold</p>
+                            <p className="text-sm font-black text-white">{allPlayers.length}</p>
+                        </div>
+                        <div className="bg-[#111] border border-white/5 p-3 rounded-2xl">
+                            <p className="text-[7px] font-black text-white/20 uppercase tracking-widest mb-1">Unsold</p>
+                            <p className="text-sm font-black text-red-400">{room?.unsold?.length || 0}</p>
                         </div>
                     </div>
 
@@ -209,7 +228,7 @@ export default function Summary({ onNavigate }) {
                     </div>
 
                     {/* Role Distribution */}
-                    <div className="bg-[#111] border border-white/5 rounded-[2.5rem] p-6 mb-8">
+                    <div className="bg-[#111] border border-white/5 rounded-[2.5rem] p-6 mb-4">
                         <h3 className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-5">Role-Based Spending</h3>
                         <div className="grid grid-cols-2 gap-4">
                             {Object.entries(roleStats).map(([role, amount]) => (
@@ -220,6 +239,24 @@ export default function Summary({ onNavigate }) {
                             ))}
                         </div>
                     </div>
+
+                    {/* Unsold Players */}
+                    {room?.unsold && room.unsold.length > 0 && (
+                        <div className="bg-[#111] border border-white/5 rounded-[2.5rem] p-6 mb-8">
+                            <h3 className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-4">Unsold Players ({room.unsold.length})</h3>
+                            <div className="space-y-2 max-h-64 overflow-y-auto no-scrollbar">
+                                {room.unsold.map((p, i) => (
+                                    <div key={i} className="flex justify-between items-center p-2.5 bg-white/[0.02] border border-white/5 rounded-xl">
+                                        <div>
+                                            <p className="font-black text-[10px] uppercase text-red-400/80 line-through">{p.name}</p>
+                                            <p className="text-[7px] font-bold uppercase text-white/30">{p.role} • {p.country}</p>
+                                        </div>
+                                        <span className="text-[9px] font-bold text-white/20">{formatPrice(p.basePrice)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="flex-1 min-h-0 flex flex-col gap-4 animate-in slide-in-from-right duration-300">
@@ -267,19 +304,34 @@ export default function Summary({ onNavigate }) {
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar pb-8 px-1">
+                            <div className="flex-1 overflow-y-auto space-y-1.5 no-scrollbar pb-8 px-1">
                                 {selectedTeam.players.sort((a, b) => b.soldPrice - a.soldPrice).map((p, i) => (
-                                    <div key={i} className="flex justify-between items-center p-4 bg-white/[0.03] border border-white/5 rounded-2xl">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-[10px] font-black text-white/20">
+                                    <div key={i} className="flex justify-between items-center p-2.5 bg-white/[0.03] border border-white/5 rounded-xl">
+                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                            <div className="w-6 h-6 rounded bg-white/5 flex items-center justify-center text-[8px] font-black text-white/30 shrink-0">
                                                 {i + 1}
                                             </div>
-                                            <div>
-                                                <p className="font-black text-xs uppercase italic leading-none mb-1">{p.name} {p.isRTM && <span className="text-[7px] text-amber-500 ml-1">RTM</span>}</p>
-                                                <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest">{p.role}</p>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5 mb-0.5">
+                                                    <p className="font-black text-[10px] uppercase italic leading-tight truncate">{p.name}</p>
+                                                    {p.isRetained && (
+                                                        <span className="px-1 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[5px] font-black uppercase text-amber-500 shrink-0">
+                                                            RETAINED
+                                                        </span>
+                                                    )}
+                                                    {p.isRTM && !p.isRetained && (
+                                                        <span className="px-1 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[5px] font-black uppercase text-amber-500 shrink-0">
+                                                            RTM
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex gap-1.5">
+                                                    <span className="text-[6px] font-bold text-white/30 uppercase">{p.role}</span>
+                                                    {p.isOverseas && <span className="text-[6px] font-bold text-amber-500/60 uppercase">OS</span>}
+                                                </div>
                                             </div>
                                         </div>
-                                        <p className="font-black text-amber-500 text-xs tracking-tighter">{formatPrice(p.soldPrice)}</p>
+                                        <p className="font-black text-amber-500 text-[9px] tracking-tighter shrink-0 ml-2">{formatPrice(p.soldPrice)}</p>
                                     </div>
                                 ))}
                                 {selectedTeam.players.length === 0 && (

@@ -80,13 +80,35 @@ export default function TeamSelection({ onNavigate }) {
     const handleFinalConfirm = () => {
         if (selected) {
             selectTeam(selected, retentions, getRTMCount(), calculateCost());
-            onNavigate('auction'); // FIX: Navigate to auction
+            // Wait a bit for server to process, then navigate
+            setTimeout(() => {
+                onNavigate('auction');
+            }, 300);
         }
     };
 
     if (phase === 'RETENTION') {
         const totalCost = calculateCost();
         const rtmCount = getRTMCount();
+
+        const getRetentionCost = (player, index) => {
+            const capped = retentions.filter(p => p.isCapped).indexOf(player);
+            const uncapped = retentions.filter(p => !p.isCapped).indexOf(player);
+            
+            if (player.isCapped) {
+                const cappedCosts = [180000000, 140000000, 110000000, 180000000];
+                return cappedCosts[capped] || 0;
+            } else {
+                const uncappedCosts = [40000000, 40000000];
+                return uncappedCosts[uncapped] || 0;
+            }
+        };
+
+        const formatPrice = (price) => {
+            if (!price) return '₹0';
+            if (price < 10000000) return `₹${(price / 100000).toFixed(0)}L`;
+            return `₹${(price / 10000000).toFixed(2)}Cr`;
+        };
 
         return (
             <div className="h-screen bg-black text-white flex flex-col p-6 animate-in fade-in duration-300">
@@ -99,7 +121,7 @@ export default function TeamSelection({ onNavigate }) {
                     </div>
                     <div className="text-right">
                         <p className="text-[10px] font-bold uppercase text-white/30">Purse Impact</p>
-                        <p className="text-xl font-black text-red-500">-{totalCost / 10000000} Cr</p>
+                        <p className="text-xl font-black text-red-500">-{formatPrice(totalCost)}</p>
                     </div>
                 </div>
 
@@ -108,6 +130,7 @@ export default function TeamSelection({ onNavigate }) {
                         <div className="text-white/30 text-center text-xs mt-10">No players available from previous squad.</div>
                     ) : availablePlayers.map(p => {
                         const isSelected = retentions.some(r => r.id === p.id);
+                        const retentionCost = isSelected ? getRetentionCost(p, retentions.indexOf(retentions.find(r => r.id === p.id))) : 0;
                         return (
                             <button
                                 key={p.id}
@@ -117,11 +140,16 @@ export default function TeamSelection({ onNavigate }) {
                                     : 'bg-[#111] border-white/5 opacity-60 hover:opacity-100'
                                     }`}
                             >
-                                <div className="text-left">
-                                    <p className={`font-black text-sm uppercase ${isSelected ? 'text-amber-500' : 'text-white'}`}>{p.name}</p>
+                                <div className="text-left flex-1 min-w-0">
+                                    <p className={`font-black text-sm uppercase truncate ${isSelected ? 'text-amber-500' : 'text-white'}`}>{p.name}</p>
                                     <p className="text-[9px] font-bold uppercase text-white/30">{p.role} • {p.isCapped ? 'Capped' : 'Uncapped'}</p>
                                 </div>
-                                {isSelected && <span className="text-xs font-black text-emerald-500">RETAINED</span>}
+                                {isSelected && (
+                                    <div className="text-right shrink-0 ml-3">
+                                        <span className="text-xs font-black text-emerald-500 block">RETAINED</span>
+                                        <span className="text-[9px] font-black text-amber-500">{formatPrice(retentionCost)}</span>
+                                    </div>
+                                )}
                             </button>
                         )
                     })}
@@ -215,7 +243,10 @@ export default function TeamSelection({ onNavigate }) {
                                 // Default RTM Logic if No Retention Phase: 6 if enabled, else 0
                                 const rtmCount = useAuctionStore.getState().room?.config?.allowRTM ? 6 : 0;
                                 selectTeam(selected, [], rtmCount, 0);
-                                onNavigate('auction');
+                                // Wait a bit for server to process, then navigate
+                                setTimeout(() => {
+                                    onNavigate('auction');
+                                }, 300);
                             }
                         }}
                         className={`w-full h-14 rounded-2xl font-black text-sm uppercase tracking-[4px] transition-all ${selected

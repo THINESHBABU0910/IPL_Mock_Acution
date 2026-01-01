@@ -8,6 +8,8 @@ import { useAuctionStore } from './store/auctionStore';
 export default function App() {
   const [activeScreen, setActiveScreen] = useState('landing');
   const room = useAuctionStore((state) => state.room);
+  const currentUser = useAuctionStore((state) => state.currentUser);
+  const isConnected = useAuctionStore((state) => state.isConnected);
 
   // Sync URL with Room Code
   useEffect(() => {
@@ -18,11 +20,44 @@ export default function App() {
         window.history.pushState({}, '', '/');
       }
     }
+  }, [room?.code]);
 
-    if (room?.status === 'FINISHED') {
-      setActiveScreen('summary');
+  // Auto-navigate based on room status and user state
+  useEffect(() => {
+    if (!room) {
+      // Check if URL has room code - if so, Landing will handle auto-join
+      const pathCode = window.location.pathname.substring(1);
+      if (pathCode && pathCode.length === 6) {
+        // URL has room code, wait for auto-join to complete
+        // Don't navigate yet, let Landing handle it
+        return;
+      }
+      // No room and no room code in URL - show landing page
+      if (activeScreen !== 'landing' && !isConnected) {
+        setActiveScreen('landing');
+      }
+      return;
     }
-  }, [room?.code, room?.status]);
+
+    // Room exists - navigate based on status and user state
+    if (room.status === 'FINISHED') {
+      if (activeScreen !== 'summary') {
+        setActiveScreen('summary');
+      }
+    } else if (room.status === 'LIVE' || room.status === 'RTM_PHASE' || room.status === 'WAITING') {
+      // If user already has a team, skip team selection and go directly to auction
+      if (currentUser?.team) {
+        if (activeScreen !== 'auction') {
+          setActiveScreen('auction');
+        }
+      } else {
+        // User doesn't have team yet - go to team selection
+        if (activeScreen !== 'team-selection') {
+          setActiveScreen('team-selection');
+        }
+      }
+    }
+  }, [room, currentUser?.team, activeScreen, isConnected]);
 
   const navigate = (screen) => {
     setActiveScreen(screen);

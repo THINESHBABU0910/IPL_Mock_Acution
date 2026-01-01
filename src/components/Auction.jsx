@@ -32,6 +32,7 @@ export default function Auction({ onNavigate }) {
     const showNotification = useAuctionStore((state) => state.showNotification);
     const confirmAction = useAuctionStore((state) => state.confirmAction);
     const endGame = useAuctionStore((state) => state.endGame);
+    const exitRoom = useAuctionStore((state) => state.exitRoom);
 
     const scrollRef = useRef(null);
     const currentPlayer = shuffledPool[currentPlayerIndex];
@@ -46,12 +47,19 @@ export default function Auction({ onNavigate }) {
     }, [activity]);
 
     useEffect(() => {
-        if (!currentUser?.team) {
-            onNavigate('team-selection');
-        } else if (!viewTeam) {
+        // Allow users to spectate even without a team
+        // Only redirect to team-selection if room is in WAITING status and user wants to play
+        if (!currentUser?.team && room && room.status === 'WAITING') {
+            // Room is waiting - user can still spectate, but offer team selection
+            // Don't force redirect - allow spectating
+        } else if (currentUser?.team && !viewTeam) {
             setViewTeam(currentUser.team);
+        } else if (!currentUser?.team && !viewTeam && room) {
+            // User is spectating - set viewTeam to first available team or null
+            const firstTeam = Object.keys(teams)[0];
+            if (firstTeam) setViewTeam(firstTeam);
         }
-    }, [currentUser?.team, onNavigate, viewTeam]);
+    }, [currentUser?.team, onNavigate, viewTeam, room, teams]);
 
     useEffect(() => {
         if (room?.rtmState?.stage === 'HIKE' && room.rtmState.currentBid?.amount) {
@@ -92,7 +100,8 @@ export default function Auction({ onNavigate }) {
         return formatPrice(next);
     };
 
-    if (!currentUser?.team) return null;
+    // Allow spectating even without a team
+    // if (!currentUser?.team) return null;
 
     // Game Over Screen
     if (!currentPlayer) {
@@ -219,34 +228,56 @@ export default function Auction({ onNavigate }) {
             </div>
 
             {/* QUICK STATS & BID BUTTON - Compact */}
-            <div className="px-3 shrink-0 pb-2 z-10">
-                <div className="flex justify-between items-center px-2 mb-2">
-                    <div className="flex flex-col">
-                        <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Remaining Purse</span>
-                        <span className="text-sm font-black text-emerald-400">{formatPrice(myTeam?.purse)}</span>
+                <div className="px-3 shrink-0 pb-2 z-10">
+                {currentUser?.team ? (
+                    <div className="flex justify-between items-center px-2 mb-2">
+                        <div className="flex flex-col">
+                            <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Remaining Purse</span>
+                            <span className="text-sm font-black text-emerald-400">{formatPrice(myTeam?.purse)}</span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                            <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Squad Status</span>
+                            <span className="text-sm font-black text-white">{myTeam?.players.length} <span className="text-white/30">/ 25</span></span>
+                        </div>
                     </div>
-                    <div className="flex flex-col text-right">
-                        <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Squad Status</span>
-                        <span className="text-sm font-black text-white">{myTeam?.players.length} <span className="text-white/30">/ 25</span></span>
+                ) : (
+                    <div className="flex justify-center items-center px-2 mb-2 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                        <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider">Spectating Mode • Select a team to play</span>
                     </div>
-                </div>
+                )}
 
                 <div className="flex gap-2 h-16">
-                    <button
-                        onClick={handleBid}
-                        disabled={!isLive || isPaused || (currentBid?.team === currentUser?.team)}
-                        className={`flex-1 rounded-xl relative overflow-hidden transition-all shadow-[0_0_40px_-5px_#10b98140] ${isLive && !isPaused && (currentBid?.team !== currentUser?.team) ? 'bg-emerald-600 active:scale-[0.98]' : 'bg-[#1a1a1a] grayscale opacity-50 cursor-not-allowed'}`}
-                    >
-                        <div className={`absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 ${(!isLive || isPaused || (currentBid?.team === currentUser?.team)) ? 'hidden' : ''}`}></div>
-                        <div className="relative flex flex-col items-center justify-center">
-                            <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
-                                {!isLive ? 'Waiting for Host' : isPaused ? 'Paused' : 'Make Offer'}
-                            </span>
-                            <span className={`text-2xl font-black italic uppercase leading-none tracking-tight ${!isLive || isPaused || (currentBid?.team === currentUser?.team) ? 'opacity-30' : ''}`}>
-                                Bid {getNextBidUI()}
-                            </span>
-                        </div>
-                    </button>
+                    {currentUser?.team ? (
+                        <button
+                            onClick={handleBid}
+                            disabled={!isLive || isPaused || (currentBid?.team === currentUser?.team)}
+                            className={`flex-1 rounded-xl relative overflow-hidden transition-all shadow-[0_0_40px_-5px_#10b98140] ${isLive && !isPaused && (currentBid?.team !== currentUser?.team) ? 'bg-emerald-600 active:scale-[0.98]' : 'bg-[#1a1a1a] grayscale opacity-50 cursor-not-allowed'}`}
+                        >
+                            <div className={`absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 ${(!isLive || isPaused || (currentBid?.team === currentUser?.team)) ? 'hidden' : ''}`}></div>
+                            <div className="relative flex flex-col items-center justify-center">
+                                <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
+                                    {!isLive ? 'Waiting for Host' : isPaused ? 'Paused' : 'Make Offer'}
+                                </span>
+                                <span className={`text-2xl font-black italic uppercase leading-none tracking-tight ${!isLive || isPaused || (currentBid?.team === currentUser?.team) ? 'opacity-30' : ''}`}>
+                                    Bid {getNextBidUI()}
+                                </span>
+                            </div>
+                        </button>
+                    ) : (
+                        <button
+                            onClick={() => onNavigate('team-selection')}
+                            className="flex-1 rounded-xl bg-amber-600 active:scale-[0.98] transition-all shadow-[0_0_40px_-5px_rgba(245,158,11,0.4)]"
+                        >
+                            <div className="relative flex flex-col items-center justify-center">
+                                <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
+                                    Spectating
+                                </span>
+                                <span className="text-2xl font-black italic uppercase leading-none tracking-tight">
+                                    Join Game
+                                </span>
+                            </div>
+                        </button>
+                    )}
                     <button
                         onClick={() => setShowSetModal(true)}
                         className="w-16 bg-[#181818] rounded-xl flex items-center justify-center border border-white/5 active:bg-[#222]"
@@ -434,16 +465,28 @@ export default function Auction({ onNavigate }) {
                         <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2">
                             {teams[viewTeam]?.players.map((p, i) => (
                                 <div key={i} className="flex justify-between items-center p-3 bg-[#111] rounded-xl border border-white/5 animate-in slide-in-from-bottom-2 duration-300">
-                                    <div className="flex flex-col">
-                                        <span className="font-black text-xs uppercase text-white tracking-tight">{p.name}</span>
-                                        <div className="flex gap-2 mt-1">
+                                    <div className="flex flex-col flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <span className="font-black text-xs uppercase text-white tracking-tight truncate">{p.name}</span>
+                                            {p.isRetained && (
+                                                <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[6px] font-black uppercase text-amber-500 shrink-0">
+                                                    RETAINED
+                                                </span>
+                                            )}
+                                            {p.isRTM && !p.isRetained && (
+                                                <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[6px] font-black uppercase text-amber-500 shrink-0">
+                                                    RTM
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
                                             <span className="text-[7px] font-bold uppercase text-black bg-white/50 px-1.5 py-0.5 rounded-sm tracking-wider">{p.role}</span>
                                             <span className={`text-[7px] font-bold uppercase px-1.5 py-0.5 rounded-sm tracking-wider ${p.isOverseas ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}>
                                                 {p.country}
                                             </span>
                                         </div>
                                     </div>
-                                    <span className="font-black text-xs text-emerald-400">{formatPrice(p.soldPrice)}</span>
+                                    <span className="font-black text-xs text-emerald-400 shrink-0 ml-2">{formatPrice(p.soldPrice)}</span>
                                 </div>
                             ))}
                             {teams[viewTeam]?.players.length === 0 && (
@@ -552,14 +595,28 @@ export default function Auction({ onNavigate }) {
 
                                     return allSold.map((p, i) => (
                                         <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center">
-                                            <div className="flex items-center gap-4">
-                                                <div className="font-black text-amber-500 text-lg w-8 text-center">{i + 1}</div>
-                                                <div>
-                                                    <p className="font-black text-sm uppercase">{p.name}</p>
-                                                    <p className="text-[8px] font-bold uppercase text-white/40">Sold to {p.winner}</p>
+                                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                                                <div className="font-black text-amber-500 text-lg w-8 text-center shrink-0">{i + 1}</div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <p className="font-black text-sm uppercase truncate">{p.name}</p>
+                                                        {p.isRetained && (
+                                                            <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[7px] font-black uppercase text-amber-500 shrink-0">
+                                                                RETAINED
+                                                            </span>
+                                                        )}
+                                                        {p.isRTM && !p.isRetained && (
+                                                            <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[7px] font-black uppercase text-amber-500 shrink-0">
+                                                                RTM
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-[8px] font-bold uppercase text-white/40">
+                                                        {p.isRetained ? 'Retained by' : 'Sold to'} {p.winner}
+                                                    </p>
                                                 </div>
                                             </div>
-                                            <span className="text-sm font-black text-emerald-400">{formatPrice(p.soldPrice)}</span>
+                                            <span className="text-sm font-black text-emerald-400 shrink-0 ml-3">{formatPrice(p.soldPrice)}</span>
                                         </div>
                                     ));
                                 })()}
@@ -574,12 +631,15 @@ export default function Auction({ onNavigate }) {
                                     if (unsold.length === 0) return <div className="text-white/30 text-center py-10 font-black uppercase text-xs tracking-widest">No unsold players</div>;
 
                                     return unsold.map((p, i) => (
-                                        <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center opacity-60">
-                                            <div>
-                                                <p className="font-black text-sm uppercase text-red-400 line-through">{p.name}</p>
-                                                <p className="text-[8px] font-bold uppercase text-white/40">{p.role}</p>
+                                        <div key={i} className="p-3 bg-[#111] rounded-xl border border-white/5 flex justify-between items-center">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-black text-sm uppercase text-red-400/80 line-through truncate">{p.name}</p>
+                                                <div className="flex gap-2 mt-1">
+                                                    <p className="text-[8px] font-bold uppercase text-white/40">{p.role}</p>
+                                                    {p.country && <p className="text-[8px] font-bold uppercase text-white/30">{p.country}</p>}
+                                                </div>
                                             </div>
-                                            <span className="text-xs font-bold text-white/20">{formatPrice(p.basePrice)}</span>
+                                            <span className="text-xs font-bold text-white/30 shrink-0 ml-3">{formatPrice(p.basePrice)}</span>
                                         </div>
                                     ));
                                 })()}
@@ -592,11 +652,24 @@ export default function Auction({ onNavigate }) {
             {showExitConfirm && (
                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-8">
                     <div className="bg-[#151515] p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center shadow-2xl">
-                        <h3 className="text-lg font-black uppercase italic mb-2">Close Arena?</h3>
-                        <p className="text-xs text-white/40 mb-6">This will end the session for all commanders.</p>
+                        <h3 className="text-lg font-black uppercase italic mb-2">Exit Arena?</h3>
+                        <p className="text-xs text-white/40 mb-6">You can return to this room anytime from Recent games.</p>
                         <div className="grid grid-cols-2 gap-3">
                             <button onClick={() => setShowExitConfirm(false)} className="py-3 rounded-xl bg-white/5 font-bold text-xs hover:bg-white/10">CANCEL</button>
-                            <button onClick={() => onNavigate('landing')} className="py-3 rounded-xl bg-red-600 font-bold text-xs hover:bg-red-700">CONFIRM</button>
+                            <button 
+                                onClick={() => {
+                                    // Exit room - disconnect and clear state (preserves history)
+                                    exitRoom();
+                                    // Navigate to landing page
+                                    setShowExitConfirm(false);
+                                    onNavigate('landing');
+                                    // Update URL to landing
+                                    window.history.pushState({}, '', '/');
+                                }} 
+                                className="py-3 rounded-xl bg-red-600 font-bold text-xs hover:bg-red-700"
+                            >
+                                CONFIRM
+                            </button>
                         </div>
                     </div>
                 </div>

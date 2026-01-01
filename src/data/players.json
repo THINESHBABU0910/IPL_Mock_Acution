@@ -138,21 +138,6 @@
       "isCapped": true
     },
     {
-      "id": "CSK06",
-      "name": "Ravichandran Ashwin",
-      "country": "India",
-      "role": "BOWLER",
-      "battingStyle": "RHB",
-      "bowlingStyle": "Right-arm Offbreak",
-      "basePrice": 20000000,
-      "isOverseas": false,
-      "previousTeam": "CSK",
-      "category": "Spin Bowlers",
-      "set": "M2",
-      "age": 38,
-      "isCapped": true
-    },
-    {
       "id": "CSK07",
       "name": "Devon Conway",
       "country": "New Zealand",
@@ -960,6 +945,21 @@
       "set": "UAL1",
       "age": 21,
       "isCapped": false
+    },
+    {
+      "id": "RCB18",
+      "name": "Cameron Green",
+      "country": "Australia",
+      "role": "ALL-ROUNDER",
+      "battingStyle": "RHB",
+      "bowlingStyle": "Right-arm Fast-Medium",
+      "basePrice": 20000000,
+      "isOverseas": true,
+      "previousTeam": "RCB",
+      "category": "All-Rounders",
+      "set": "M1",
+      "age": 25,
+      "isCapped": true
     },
     {
       "id": "KKR01",
@@ -3110,21 +3110,6 @@
       "category": "Fast Bowlers",
       "set": "M2",
       "age": 31,
-      "isCapped": true
-    },
-    {
-      "id": "CSV20",
-      "name": "Ravichandaran Ashwin",
-      "country": "India",
-      "role": "ALL-ROUNDER",
-      "battingStyle": "RHB",
-      "bowlingStyle": "RIGHT ARM Off Spin",
-      "basePrice": 20000000,
-      "isOverseas": false,
-      "previousTeam": "RR",
-      "category": "All-Rounders",
-      "set": "AL1",
-      "age": 38,
       "isCapped": true
     },
     {

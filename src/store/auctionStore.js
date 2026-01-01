@@ -35,11 +35,49 @@ export const useAuctionStore = create()(
             isConnected: false,
             notification: null, // { message, type }
             confirmation: null, // { message, onConfirm }
+            lastRoomCode: null, // Track last room for auto-rejoin
 
             connect: (userName, roomCode, action = 'JOIN', config = {}) => {
-                if (socket) socket.close();
+                // Close existing connection safely (but DON'T clear room data - it's preserved on server)
+                if (socket) {
+                    // Only close if socket is in a state that allows closing
+                    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                        try {
+                            socket.close();
+                        } catch (e) {
+                            console.log('Socket already closed or closing');
+                        }
+                    }
+                    socket = null;
+                }
+                
+                // If joining a different room, clear current room VIEW state (not server data)
+                // Server data is always preserved - we just clear the local view
+                const currentRoom = get().room?.code;
+                if (currentRoom && roomCode && currentRoom !== roomCode) {
+                    // Switching to a different room - clear local view state only
+                    // Server still has all the data for both rooms
+                    set({
+                        teams: INITIAL_TEAMS,
+                        shuffledPool: [],
+                        currentPlayerIndex: 0,
+                        currentBid: null,
+                        timer: 15,
+                        activity: [],
+                        onlineUsers: []
+                    });
+                }
+                
                 const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8081';
-                socket = new WebSocket(wsUrl);
+                
+                try {
+                    socket = new WebSocket(wsUrl);
+                } catch (error) {
+                    console.error('Failed to create WebSocket:', error);
+                    get().showNotification('Failed to connect to server. Please check if server is running.', 'error');
+                    set({ isConnected: false });
+                    return;
+                }
 
                 socket.onopen = () => {
                     set({ isConnected: true });
@@ -60,40 +98,106 @@ export const useAuctionStore = create()(
 
                     if (data.type === 'ROOM_CREATED' || data.type === 'JOIN_SUCCESS') {
                         const { room } = data;
+                        
+                        // Update recent arenas - NO LIMIT, keep ALL rooms forever
+                        const recentArenas = get().recentArenas || [];
+                        const existingIndex = recentArenas.findIndex(r => r.code === room.code);
+                        const roomEntry = {
+                            code: room.code,
+                            creator: room.creator,
+                            status: room.status,
+                            lastAccessed: Date.now()
+                        };
+                        
+                        if (existingIndex >= 0) {
+                            // Update existing room entry with new lastAccessed time
+                            recentArenas[existingIndex] = roomEntry;
+                        } else {
+                            // Add new room to the beginning (most recent first)
+                            recentArenas.unshift(roomEntry);
+                            // NO LIMIT - keep all rooms forever for history
+                        }
+                        
+                        // Check if user already has a team in this SPECIFIC room
+                        // Server sends room.players object which contains player data for THIS room
+                        let userTeam = null;
+                        if (room.players && room.players[userName]) {
+                            userTeam = room.players[userName].team || null;
+                        }
+                        
+                        // Also check playersList if provided
+                        if (!userTeam && data.playersList) {
+                            const myData = data.playersList.find(p => p.name === userName);
+                            if (myData && myData.team) {
+                                userTeam = myData.team;
+                            }
+                        }
+                        
+                        // COMPLETELY REPLACE state with this room's data
+                        // This ensures each room has its own isolated state
                         set({
                             room: {
                                 code: room.code,
                                 creator: room.creator,
                                 config: room.config,
                                 status: room.status,
-                                rtmState: room.rtmState
+                                rtmState: room.rtmState,
+                                unsold: room.unsold || []
                             },
-                            teams: room.teams,
-                            shuffledPool: room.pool,
-                            currentPlayerIndex: room.currentPlayerIndex,
-                            currentBid: room.currentBid,
-                            timer: room.timer,
-                            timerDuration: room.timerDuration,
-                            activity: room.activity,
-                            currentUser: { name: userName, team: null } // Team update will come from STATE_UPDATE
+                            // Replace ALL room-specific data with this room's data
+                            teams: { ...room.teams }, // Deep copy to ensure isolation
+                            shuffledPool: [...(room.pool || [])], // Deep copy
+                            currentPlayerIndex: room.currentPlayerIndex || 0,
+                            currentBid: room.currentBid ? { ...room.currentBid } : null,
+                            timer: room.timer || 15,
+                            timerDuration: room.timerDuration || 15,
+                            activity: [...(room.activity || [])], // Deep copy
+                            currentUser: { name: userName, team: userTeam }, // Team is room-specific
+                            lastRoomCode: room.code,
+                            recentArenas: recentArenas,
+                            onlineUsers: data.playersList || []
                         });
                     }
 
                     if (data.type === 'STATE_UPDATE') {
                         const { room, playersList } = data;
+                        
+                        // Only update if this is for the current room
+                        // This ensures room isolation - updates from other rooms are ignored
+                        const currentRoomCode = get().room?.code;
+                        if (currentRoomCode && room?.code && room.code !== currentRoomCode) {
+                            // This update is for a different room, ignore it
+                            console.log(`Ignoring STATE_UPDATE for different room: ${room.code} (current: ${currentRoomCode})`);
+                            return;
+                        }
+                        
+                        // If we don't have a room yet, this shouldn't happen, but be safe
+                        if (!currentRoomCode && room?.code) {
+                            // We received an update but don't have a room - might be stale, ignore
+                            return;
+                        }
+                        
                         set(state => ({
-                            room: { ...state.room, status: room.status, isPaused: room.isPaused, config: room.config, rtmState: room.rtmState },
-                            teams: room.teams,
-                            shuffledPool: room.pool, // Added: Ensure pool stays in sync
+                            room: { 
+                                ...state.room, 
+                                status: room.status, 
+                                isPaused: room.isPaused, 
+                                config: room.config, 
+                                rtmState: room.rtmState,
+                                unsold: room.unsold || []
+                            },
+                            // Update with deep copies to ensure room isolation
+                            teams: { ...room.teams },
+                            shuffledPool: [...(room.pool || [])],
                             currentPlayerIndex: room.currentPlayerIndex,
-                            currentBid: room.currentBid,
+                            currentBid: room.currentBid ? { ...room.currentBid } : null,
                             timerDuration: room.timerDuration,
-                            activity: room.activity,
-                            onlineUsers: playersList
+                            activity: [...(room.activity || [])],
+                            onlineUsers: playersList || []
                         }));
 
-                        // Update my own team if it changed on server
-                        const myData = playersList.find(p => p.name === get().currentUser?.name);
+                        // Update my own team if it changed on server (for this room)
+                        const myData = playersList?.find(p => p.name === get().currentUser?.name);
                         if (myData && myData.team) {
                             set(state => ({ currentUser: { ...state.currentUser, team: myData.team } }));
                         }
@@ -108,19 +212,37 @@ export const useAuctionStore = create()(
                     }
                 };
 
-                socket.onclose = () => {
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
                     set({ isConnected: false });
-                    // Basic Auto-Reconnect
+                    get().showNotification('Connection error. Retrying...', 'error');
+                    // Retry connection after delay
                     setTimeout(() => {
                         if (!get().isConnected && get().room?.code && get().currentUser?.name) {
-                            console.log("Attempting reconnect...");
+                            console.log("Attempting reconnect after error...");
                             get().joinRoom(get().room.code, get().currentUser.name);
                         }
-                    }, 3000);
+                    }, 2000);
+                };
+
+                socket.onclose = (event) => {
+                    set({ isConnected: false });
+                    // Only auto-reconnect if it wasn't a manual close
+                    if (event.code !== 1000 && event.code !== 1001) {
+                        // Unexpected close - try to reconnect
+                        setTimeout(() => {
+                            if (!get().isConnected && get().room?.code && get().currentUser?.name) {
+                                console.log("Attempting reconnect after close...");
+                                get().joinRoom(get().room.code, get().currentUser.name);
+                            }
+                        }, 3000);
+                    }
                 };
             },
 
             createRoom: (userName, config = {}) => {
+                // Clear any existing room state before creating new room
+                get().clearRoomState();
                 get().connect(userName, null, 'CREATE', config);
             },
 
@@ -146,14 +268,16 @@ export const useAuctionStore = create()(
             placeBid: (player) => {
                 // Validation first
                 const { currentBid, currentUser, teams } = get();
-                if (!currentUser?.team) return { success: false, reason: "Select a team first!" };
+                if (!currentUser?.team) return { success: false, reason: "Select a team first to bid!" };
 
                 const team = teams[currentUser.team];
+                if (!team) return { success: false, reason: "Team not found!" };
+
                 // Calculate locally to validate (server will double check)
                 const amount = currentBid?.amount || (player.basePrice - 2000000); // Hacky local check, server is auth
 
                 // Just send the bid intent
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     const nextAmount = get().getNextBidAmount(currentBid?.amount, player.basePrice);
                     if (team.purse < nextAmount) return { success: false, reason: "Insufficient Purse!" };
                     if (player.isOverseas && team.overseasCount >= 8) return { success: false, reason: "OS limit reached!" };
@@ -166,39 +290,51 @@ export const useAuctionStore = create()(
             },
 
             addChat: (text) => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: 'CHAT', text }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
             startGame: () => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: 'START_GAME' }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
             togglePause: (isPaused) => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     const type = isPaused ? 'RESUME_GAME' : 'PAUSE_GAME';
                     socket.send(JSON.stringify({ type }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
             endGame: () => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: 'END_GAME' }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
             updateSettings: (newDuration) => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: 'UPDATE_SETTINGS', timerDuration: newDuration }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
             rtmDecision: (decision, amount = null) => {
-                if (socket && socket.readyState === 1) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: 'RTM_DECISION', decision, amount }));
+                } else {
+                    get().showNotification('Not connected. Please wait...', 'error');
                 }
             },
 
@@ -220,12 +356,66 @@ export const useAuctionStore = create()(
 
             reset: () => {
                 if (socket) socket.close();
-                set({ room: null, currentUser: null, teams: INITIAL_TEAMS });
+                // Complete reset - clear current session but PRESERVE recentArenas history
+                // This allows users to see all their rooms even after reset
+                const recentArenas = get().recentArenas || []; // Preserve history
+                set({ 
+                    room: null, 
+                    currentUser: null, 
+                    teams: INITIAL_TEAMS,
+                    shuffledPool: [],
+                    currentPlayerIndex: 0,
+                    currentBid: null,
+                    timer: 15,
+                    timerDuration: 15,
+                    activity: [],
+                    onlineUsers: [],
+                    isConnected: false,
+                    lastRoomCode: null,
+                    recentArenas: recentArenas // Keep all room history
+                });
+            },
+            
+            // Helper to clear room state when leaving a room (preserves history)
+            clearRoomState: () => {
+                // Close socket connection safely
+                if (socket) {
+                    try {
+                        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                            socket.close(1000, 'User leaving room'); // Normal closure
+                        }
+                    } catch (e) {
+                        console.log('Socket already closed');
+                    }
+                    socket = null;
+                }
+                // Clear current room state but preserve user info and room history
+                set({
+                    room: null,
+                    teams: INITIAL_TEAMS,
+                    shuffledPool: [],
+                    currentPlayerIndex: 0,
+                    currentBid: null,
+                    timer: 15,
+                    activity: [],
+                    onlineUsers: [],
+                    isConnected: false
+                    // Keep: currentUser, lastRoomCode, recentArenas
+                });
+            },
+            
+            // Exit room - disconnect and go to landing (preserves all history)
+            exitRoom: () => {
+                get().clearRoomState();
             }
         }),
         {
             name: 'auction-storage-ws',
-            partialize: (state) => ({ currentUser: state.currentUser }), // Only persist user info
+            partialize: (state) => ({ 
+                currentUser: state.currentUser,
+                lastRoomCode: state.lastRoomCode,
+                recentArenas: state.recentArenas || []
+            }), // Persist user info, last room, and recent arenas
         }
     )
 );

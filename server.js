@@ -25,10 +25,14 @@ server.listen(PORT, () => {
 });
 
 // Persistence Layer
+// IMPORTANT: Rooms are NEVER deleted - all room data is preserved forever
+// Players can join multiple rooms, play with different teams, and return anytime
+// All room history, teams, players, and auction data is permanently stored
 let rooms = {};
 if (fs.existsSync(DATA_FILE)) {
     try {
         rooms = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        console.log(`Loaded ${Object.keys(rooms).length} rooms from persistence`);
         // Reset player connections on restart (they need to reconnect)
         Object.values(rooms).forEach(room => {
             // Keep the players object but ensure no hanging socket references (JSON.parse handles this naturally, 
@@ -44,25 +48,29 @@ if (fs.existsSync(DATA_FILE)) {
 }
 
 const saveRooms = () => {
+    // Save ALL rooms - never delete any room data
+    // This ensures players can return to any room anytime, even weeks later
     const dataToSave = {};
     Object.entries(rooms).forEach(([code, room]) => {
-        // Serialize players: keep data, remove socket
+        // Serialize players: keep ALL data (name, team assignments), remove socket references
         const serializedPlayers = {};
         Object.entries(room.players).forEach(([name, p]) => {
             serializedPlayers[name] = {
                 name: p.name,
-                team: p.team,
+                team: p.team, // Preserve team assignment per room
                 isOnline: false // Always save as offline, they reconnect to become online
             };
         });
 
+        // Save complete room state: teams, players, pool, activity, unsold, etc.
         dataToSave[code] = {
             ...room,
             players: serializedPlayers,
-            timerInterval: null
+            timerInterval: null // Don't persist timer intervals
         };
     });
     fs.writeFileSync(DATA_FILE, JSON.stringify(dataToSave, null, 2));
+    console.log(`Saved ${Object.keys(dataToSave).length} rooms to persistence`);
 };
 
 const shuffleArray = (array) => {
@@ -87,8 +95,21 @@ wss.on('connection', (ws) => {
     let currentUser = null;
     let currentRoom = null;
 
+    // Handle connection errors gracefully
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error.message);
+        // Don't crash - just log the error
+    });
+
     ws.on('message', (message) => {
-        const data = JSON.parse(message);
+        let data;
+        try {
+            data = JSON.parse(message);
+        } catch (error) {
+            console.error('Failed to parse message:', error.message);
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid message format' }));
+            return;
+        }
 
         // CREATE_ROOM
         if (data.type === 'CREATE_ROOM') {
@@ -115,7 +136,14 @@ wss.on('connection', (ws) => {
             currentUser = data.userName;
             rooms[code].players[currentUser] = { ws, team: null, isOnline: true };
 
-            ws.send(JSON.stringify({ type: 'ROOM_CREATED', code, room: rooms[code] }));
+            // Send safe room object (without timerInterval and WebSocket references)
+            const safeRoom = getSafeRoom(rooms[code]);
+            try {
+                ws.send(JSON.stringify({ type: 'ROOM_CREATED', code, room: safeRoom }));
+            } catch (error) {
+                console.error('Error sending ROOM_CREATED:', error.message);
+                ws.send(JSON.stringify({ type: 'ERROR', message: 'Failed to create room data' }));
+            }
             broadcastRoomUpdate(code);
             saveRooms();
         }
@@ -127,10 +155,31 @@ wss.on('connection', (ws) => {
                 currentRoom = code;
                 currentUser = userName;
 
+                // Restore player's team if they had one (for this room)
+                // Timer continues running in background regardless of player connections
                 const existing = rooms[code].players[currentUser];
                 rooms[code].players[currentUser] = { ws, team: existing?.team || null, isOnline: true };
 
-                ws.send(JSON.stringify({ type: 'JOIN_SUCCESS', room: rooms[code] }));
+                // Send current room state including current timer value
+                // Player will see the game state as it is, even if they were disconnected
+                // Use safe room object (without timerInterval and WebSocket references)
+                const safeRoom = getSafeRoom(rooms[code]);
+                const playersList = Object.entries(rooms[code].players || {}).map(([name, data]) => ({ 
+                    name, 
+                    team: data.team || null, 
+                    isOnline: data.isOnline || false
+                }));
+                
+                try {
+                    ws.send(JSON.stringify({ 
+                        type: 'JOIN_SUCCESS', 
+                        room: safeRoom,
+                        playersList 
+                    }));
+                } catch (error) {
+                    console.error('Error sending JOIN_SUCCESS:', error.message);
+                    ws.send(JSON.stringify({ type: 'ERROR', message: 'Failed to send room data' }));
+                }
                 broadcastRoomUpdate(code);
                 saveRooms(); // Save new player registration if we want to persist teams
             } else {
@@ -152,8 +201,12 @@ wss.on('connection', (ws) => {
         if (data.type === 'PAUSE_GAME') {
             if (rooms[currentRoom] && rooms[currentRoom].creator === currentUser) {
                 rooms[currentRoom].isPaused = true;
-                if (rooms[currentRoom].timerInterval) clearInterval(rooms[currentRoom].timerInterval);
-                rooms[currentRoom].activity.unshift({ type: 'system', text: 'AUCTION PAUSED' });
+                // Stop the timer - only admin can pause
+                if (rooms[currentRoom].timerInterval) {
+                    clearInterval(rooms[currentRoom].timerInterval);
+                    rooms[currentRoom].timerInterval = null;
+                }
+                rooms[currentRoom].activity.unshift({ type: 'system', text: 'AUCTION PAUSED BY ADMIN' });
                 broadcastRoomUpdate(currentRoom);
                 saveRooms();
             }
@@ -171,8 +224,13 @@ wss.on('connection', (ws) => {
 
         if (data.type === 'END_GAME') {
             if (rooms[currentRoom] && rooms[currentRoom].creator === currentUser) {
-                if (rooms[currentRoom].timerInterval) clearInterval(rooms[currentRoom].timerInterval);
+                // Stop the timer permanently - only admin can end game
+                if (rooms[currentRoom].timerInterval) {
+                    clearInterval(rooms[currentRoom].timerInterval);
+                    rooms[currentRoom].timerInterval = null;
+                }
                 rooms[currentRoom].status = 'FINISHED';
+                rooms[currentRoom].isPaused = false; // Clear pause state
                 rooms[currentRoom].activity.unshift({ type: 'system', text: 'AUCTION CONCLUDED BY ADMIN' });
                 broadcastRoomUpdate(currentRoom);
                 saveRooms();
@@ -190,24 +248,45 @@ wss.on('connection', (ws) => {
                 // Process Retentions (if provided and not already processed for this team)
                 // Note: In a real app we'd validate this rigorously. Here we trust the client's calc for speed.
                 if (data.retentions && data.retentions.length > 0) {
-                    // Avoid double processing if multiple users somehow select same team (though UI blocks it)
-                    // Better: Reset team state first if needed, but for now we append.
-
-                    data.retentions.forEach(p => {
-                        // Add to team players if not already there
+                    // Retention price slabs (as per IPL rules)
+                    const cappedCosts = [180000000, 140000000, 110000000, 180000000]; // 18Cr, 14Cr, 11Cr, 18Cr
+                    const uncappedCosts = [40000000, 40000000]; // 4Cr, 4Cr
+                    
+                    // Separate capped and uncapped players
+                    const cappedPlayers = data.retentions.filter(p => p.isCapped);
+                    const uncappedPlayers = data.retentions.filter(p => !p.isCapped);
+                    
+                    // Process capped players with their retention prices
+                    cappedPlayers.forEach((p, index) => {
                         if (!team.players.some(tp => tp.id === p.id)) {
-                            // Mark as Sold/Retained
+                            const retentionPrice = cappedCosts[index] || 0;
                             const retainedPlayer = {
                                 ...p,
-                                soldPrice: 0, // Cost is aggregate, individual price tricky in this model, set 0 or avg? 
-                                // Actually user gave slab prices. Ideally we assign specific prices.
-                                // But since we got a lump sum cost, let's just push them.
+                                soldPrice: retentionPrice, // Assign proper retention price
                                 isRetained: true,
                                 winner: data.team
                             };
                             team.players.push(retainedPlayer);
                             if (p.isOverseas) team.overseasCount += 1;
-
+                            
+                            // REMOVE FROM POOL
+                            room.pool = room.pool.filter(poolPlayer => poolPlayer.id !== p.id);
+                        }
+                    });
+                    
+                    // Process uncapped players with their retention prices
+                    uncappedPlayers.forEach((p, index) => {
+                        if (!team.players.some(tp => tp.id === p.id)) {
+                            const retentionPrice = uncappedCosts[index] || 0;
+                            const retainedPlayer = {
+                                ...p,
+                                soldPrice: retentionPrice, // Assign proper retention price
+                                isRetained: true,
+                                winner: data.team
+                            };
+                            team.players.push(retainedPlayer);
+                            if (p.isOverseas) team.overseasCount += 1;
+                            
                             // REMOVE FROM POOL
                             room.pool = room.pool.filter(poolPlayer => poolPlayer.id !== p.id);
                         }
@@ -361,28 +440,85 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        if (rooms[currentRoom] && rooms[currentRoom].players[currentUser]) {
-            rooms[currentRoom].players[currentUser].isOnline = false;
-            broadcastRoomUpdate(currentRoom);
+        try {
+            if (currentRoom && rooms[currentRoom] && rooms[currentRoom].players[currentUser]) {
+                // Mark player as offline but DON'T stop the timer
+                // Timer continues running in the background regardless of player connections
+                rooms[currentRoom].players[currentUser].isOnline = false;
+                // Don't clear the WebSocket reference - keep it for reconnection
+                // rooms[currentRoom].players[currentUser].ws = null; // Keep for potential reconnection tracking
+                broadcastRoomUpdate(currentRoom);
+                // Timer continues - game proceeds even if all players disconnect
+            }
+        } catch (error) {
+            console.error('Error handling WebSocket close:', error.message);
+            // Don't crash - just log the error
         }
     });
 });
 
 function startTimer(code) {
-    const room = rooms[code];
-    if (!room) return;
-
-    if (room.timerInterval) clearInterval(room.timerInterval);
-
-    room.timerInterval = setInterval(() => {
-        room.timer -= 1;
-        broadcastToRoom(code, { type: 'TIMER_UPDATE', timer: room.timer });
-
-        if (room.timer <= 0) {
-            clearInterval(room.timerInterval);
-            handleHammer(code);
+    try {
+        const room = rooms[code];
+        if (!room) return;
+        
+        // Don't start timer if game is paused or finished
+        if (room.isPaused || room.status === 'FINISHED') {
+            return;
         }
-    }, 1000);
+
+        // Clear any existing timer
+        if (room.timerInterval) {
+            clearInterval(room.timerInterval);
+            room.timerInterval = null;
+        }
+
+        // Timer runs independently of player connections
+        // It continues even if all players disconnect
+        room.timerInterval = setInterval(() => {
+            try {
+                // Double-check room still exists
+                const currentRoom = rooms[code];
+                if (!currentRoom) {
+                    if (room.timerInterval) {
+                        clearInterval(room.timerInterval);
+                        room.timerInterval = null;
+                    }
+                    return;
+                }
+                
+                // Double-check pause state (defensive programming)
+                if (currentRoom.isPaused || currentRoom.status === 'FINISHED') {
+                    clearInterval(currentRoom.timerInterval);
+                    currentRoom.timerInterval = null;
+                    return;
+                }
+                
+                currentRoom.timer -= 1;
+                
+                // Broadcast timer update to all connected players (if any)
+                // Timer continues even if no one is connected
+                broadcastToRoom(code, { type: 'TIMER_UPDATE', timer: currentRoom.timer });
+
+                if (currentRoom.timer <= 0) {
+                    clearInterval(currentRoom.timerInterval);
+                    currentRoom.timerInterval = null;
+                    handleHammer(code);
+                }
+            } catch (error) {
+                console.error('Error in timer interval:', error.message);
+                // Clear timer on error to prevent infinite error loops
+                const currentRoom = rooms[code];
+                if (currentRoom && currentRoom.timerInterval) {
+                    clearInterval(currentRoom.timerInterval);
+                    currentRoom.timerInterval = null;
+                }
+            }
+        }, 1000);
+    } catch (error) {
+        console.error('Error starting timer:', error.message);
+        // Don't crash - just log the error
+    }
 }
 
 function handleHammer(code) {
@@ -495,15 +631,45 @@ function handleHammer(code) {
     saveRooms();
 }
 
+// Helper function to create a safe, serializable version of the room object
+function getSafeRoom(room) {
+    if (!room) return null;
+    
+    // Create a deep copy without circular references and non-serializable objects
+    const safeRoom = {
+        code: room.code,
+        creator: room.creator,
+        status: room.status,
+        isPaused: room.isPaused || false,
+        config: room.config || {},
+        teams: room.teams || {},
+        pool: room.pool || [],
+        currentPlayerIndex: room.currentPlayerIndex || 0,
+        currentBid: room.currentBid || null,
+        timer: room.timer || 15,
+        timerDuration: room.timerDuration || 15,
+        activity: room.activity || [],
+        unsold: room.unsold || [],
+        rtmState: room.rtmState || null
+        // Exclude: timerInterval (Timeout object with circular refs)
+        // Exclude: players (contains WebSocket objects)
+    };
+    
+    return safeRoom;
+}
+
 function broadcastRoomUpdate(code) {
     const room = rooms[code];
-    const safeRoom = {
-        ...room,
-        timerInterval: null,
-        players: undefined
-    };
-    const playersList = Object.entries(room.players).map(([name, data]) => ({ name, ...data, ws: undefined }));
-
+    if (!room) return;
+    
+    const safeRoom = getSafeRoom(room);
+    const playersList = Object.entries(room.players || {}).map(([name, data]) => ({ 
+        name, 
+        team: data.team || null, 
+        isOnline: data.isOnline || false,
+        // Exclude: ws (WebSocket object)
+    }));
+    
     broadcastToRoom(code, {
         type: 'STATE_UPDATE',
         room: safeRoom,
@@ -512,13 +678,28 @@ function broadcastRoomUpdate(code) {
 }
 
 function broadcastToRoom(code, msg) {
-    const room = rooms[code];
-    if (!room) return;
-    Object.values(room.players).forEach(p => {
-        if (p.isOnline && p.ws.readyState === 1) {
-            p.ws.send(JSON.stringify(msg));
-        }
-    });
+    try {
+        const room = rooms[code];
+        if (!room || !room.players) return;
+        
+        // Broadcast to all online players
+        // Timer continues even if no players are connected
+        Object.values(room.players).forEach(p => {
+            // Safety check: ensure WebSocket exists and is open
+            if (p && p.ws && p.isOnline && p.ws.readyState === 1) {
+                try {
+                    p.ws.send(JSON.stringify(msg));
+                } catch (error) {
+                    // If send fails, mark player as offline
+                    console.log(`Failed to send to player: ${error.message}`);
+                    if (p) p.isOnline = false;
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error in broadcastToRoom:', error.message);
+        // Don't crash - just log the error
+    }
 }
 
 function finishRTM(code) {
