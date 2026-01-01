@@ -302,7 +302,6 @@ export default function Auction({ onNavigate }) {
                             </button>
                         );
                     })() : (
-                    ) : (
                         <button
                             onClick={() => onNavigate('team-selection')}
                             className="flex-1 rounded-xl bg-amber-600 active:scale-[0.98] transition-all shadow-[0_0_40px_-5px_rgba(245,158,11,0.4)]"
