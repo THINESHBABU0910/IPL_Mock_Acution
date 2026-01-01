@@ -91,12 +91,23 @@ export default function Auction({ onNavigate }) {
 
     const getNextBidUI = () => {
         if (!currentPlayer) return '0.00 Cr';
-        const amount = currentBid?.amount || (currentPlayer.basePrice - 2000000);
+        // New player always starts at base price
+        if (!currentBid) {
+            return formatPrice(currentPlayer.basePrice);
+        }
+        
+        const amount = currentBid.amount;
         let next;
-        if (!currentBid) next = currentPlayer.basePrice;
-        else if (amount < 50000000) next = amount + 2000000;
-        else if (amount < 100000000) next = amount + 5000000;
-        else next = amount + 10000000;
+        // IPL Auction Rules: 2 Cr+ uses 0.25 Cr increments
+        if (amount >= 20000000) {
+            next = amount + 2500000; // 0.25 Cr increment
+        } else if (currentPlayer.basePrice >= 20000000) {
+            // Base price is 2 Cr+, use 0.25 Cr increments
+            next = amount + 2500000;
+        } else {
+            // Base price < 2 Cr, use 0.2 Cr increments
+            next = amount + 2000000;
+        }
         return formatPrice(next);
     };
 
@@ -131,7 +142,9 @@ export default function Auction({ onNavigate }) {
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-lg border border-white/5">
                         <span className="text-[9px] uppercase font-bold text-white/40 tracking-wider">Online</span>
-                        <span className="text-[10px] font-black text-emerald-500">{onlineUsers.filter(u => u.isOnline).length}</span>
+                        <span className="text-[10px] font-black text-emerald-500">
+                            {new Set(onlineUsers.filter(u => u.isOnline === true && u.team).map(u => u.team)).size}
+                        </span>
                     </div>
 
                     {isAdmin && (
@@ -247,22 +260,48 @@ export default function Auction({ onNavigate }) {
                 )}
 
                 <div className="flex gap-2 h-16">
-                    {currentUser?.team ? (
-                        <button
-                            onClick={handleBid}
-                            disabled={!isLive || isPaused || (currentBid?.team === currentUser?.team)}
-                            className={`flex-1 rounded-xl relative overflow-hidden transition-all shadow-[0_0_40px_-5px_#10b98140] ${isLive && !isPaused && (currentBid?.team !== currentUser?.team) ? 'bg-emerald-600 active:scale-[0.98]' : 'bg-[#1a1a1a] grayscale opacity-50 cursor-not-allowed'}`}
-                        >
-                            <div className={`absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 ${(!isLive || isPaused || (currentBid?.team === currentUser?.team)) ? 'hidden' : ''}`}></div>
-                            <div className="relative flex flex-col items-center justify-center">
-                                <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
-                                    {!isLive ? 'Waiting for Host' : isPaused ? 'Paused' : 'Make Offer'}
-                                </span>
-                                <span className={`text-2xl font-black italic uppercase leading-none tracking-tight ${!isLive || isPaused || (currentBid?.team === currentUser?.team) ? 'opacity-30' : ''}`}>
-                                    Bid {getNextBidUI()}
-                                </span>
-                            </div>
-                        </button>
+                    {currentUser?.team ? (() => {
+                        const nextBidAmount = currentBid ? 
+                            (currentBid.amount >= 20000000 ? currentBid.amount + 2500000 : 
+                             currentPlayer?.basePrice >= 20000000 ? currentBid.amount + 2500000 : 
+                             currentBid.amount + 2000000) : 
+                            (currentPlayer?.basePrice || 0);
+                        
+                        const canBid = isLive && !isPaused && (currentBid?.team !== currentUser?.team);
+                        const hasMoney = myTeam && myTeam.purse >= nextBidAmount;
+                        const hasOSSlot = !currentPlayer?.isOverseas || (myTeam && myTeam.overseasCount < 8);
+                        const hasSquadSlot = myTeam && myTeam.players.length < 25;
+                        
+                        const isDisabled = !canBid || !hasMoney || !hasOSSlot || !hasSquadSlot;
+                        let disabledReason = '';
+                        if (!canBid) {
+                            disabledReason = !isLive ? 'Waiting for Host' : isPaused ? 'Paused' : 'Your Turn';
+                        } else if (!hasMoney) {
+                            disabledReason = 'Money Over';
+                        } else if (!hasOSSlot) {
+                            disabledReason = 'OS Over';
+                        } else if (!hasSquadSlot) {
+                            disabledReason = 'Squad Full';
+                        }
+                        
+                        return (
+                            <button
+                                onClick={handleBid}
+                                disabled={isDisabled}
+                                className={`flex-1 rounded-xl relative overflow-hidden transition-all shadow-[0_0_40px_-5px_#10b98140] ${!isDisabled ? 'bg-emerald-600 active:scale-[0.98]' : 'bg-[#1a1a1a] grayscale opacity-50 cursor-not-allowed'}`}
+                            >
+                                <div className={`absolute inset-0 bg-gradient-to-br from-emerald-500 to-emerald-700 ${isDisabled ? 'hidden' : ''}`}></div>
+                                <div className="relative flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-black uppercase text-black/30 tracking-[4px] mb-1">
+                                        {disabledReason || 'Make Offer'}
+                                    </span>
+                                    <span className={`text-2xl font-black italic uppercase leading-none tracking-tight ${isDisabled ? 'opacity-30' : ''}`}>
+                                        {isDisabled ? disabledReason.toUpperCase() : `Bid ${getNextBidUI()}`}
+                                    </span>
+                                </div>
+                            </button>
+                        );
+                    })() : (
                     ) : (
                         <button
                             onClick={() => onNavigate('team-selection')}
@@ -465,32 +504,27 @@ export default function Auction({ onNavigate }) {
                             )}
                         </div>
 
-                        {/* List */}
-                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2">
+                        {/* List - Compact without stats */}
+                        <div className="flex-1 overflow-y-auto no-scrollbar p-2 space-y-1.5">
                             {teams[viewTeam]?.players.map((p, i) => (
-                                <div key={i} className="flex justify-between items-center p-3 bg-[#111] rounded-xl border border-white/5 animate-in slide-in-from-bottom-2 duration-300">
-                                    <div className="flex flex-col flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                            <span className="font-black text-xs uppercase text-white tracking-tight truncate">{p.name}</span>
-                                            {p.isRetained && (
-                                                <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[6px] font-black uppercase text-amber-500 shrink-0">
-                                                    RETAINED
-                                                </span>
-                                            )}
-                                            {p.isRTM && !p.isRetained && (
-                                                <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[6px] font-black uppercase text-amber-500 shrink-0">
-                                                    RTM
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <span className="text-[7px] font-bold uppercase text-black bg-white/50 px-1.5 py-0.5 rounded-sm tracking-wider">{p.role}</span>
-                                            <span className={`text-[7px] font-bold uppercase px-1.5 py-0.5 rounded-sm tracking-wider ${p.isOverseas ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}>
-                                                {p.country}
+                                <div key={i} className="flex justify-between items-center p-2 bg-[#111] rounded-lg border border-white/5">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        <span className="font-black text-[10px] uppercase text-white tracking-tight truncate">{p.name}</span>
+                                        {p.isRetained && (
+                                            <span className="px-1 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[5px] font-black uppercase text-amber-500 shrink-0">
+                                                R
                                             </span>
-                                        </div>
+                                        )}
+                                        {p.isRTM && !p.isRetained && (
+                                            <span className="px-1 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded text-[5px] font-black uppercase text-amber-500 shrink-0">
+                                                RTM
+                                            </span>
+                                        )}
+                                        {p.isOverseas && (
+                                            <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0"></span>
+                                        )}
                                     </div>
-                                    <span className="font-black text-xs text-emerald-400 shrink-0 ml-2">{formatPrice(p.soldPrice)}</span>
+                                    <span className="font-black text-[10px] text-emerald-400 shrink-0 ml-2">{formatPrice(p.soldPrice)}</span>
                                 </div>
                             ))}
                             {teams[viewTeam]?.players.length === 0 && (

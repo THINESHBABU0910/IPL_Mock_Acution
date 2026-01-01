@@ -273,15 +273,16 @@ export const useAuctionStore = create()(
                 const team = teams[currentUser.team];
                 if (!team) return { success: false, reason: "Team not found!" };
 
-                // Calculate locally to validate (server will double check)
-                const amount = currentBid?.amount || (player.basePrice - 2000000); // Hacky local check, server is auth
+                // Calculate next bid amount using IPL rules
+                const nextAmount = get().getNextBidAmount(currentBid?.amount, player.basePrice);
+                
+                // Validate all constraints
+                if (team.purse < nextAmount) return { success: false, reason: "Money Over!" };
+                if (player.isOverseas && team.overseasCount >= 8) return { success: false, reason: "OS Over!" };
+                if (team.players.length >= 25) return { success: false, reason: "Squad Full!" };
 
                 // Just send the bid intent
                 if (socket && socket.readyState === WebSocket.OPEN) {
-                    const nextAmount = get().getNextBidAmount(currentBid?.amount, player.basePrice);
-                    if (team.purse < nextAmount) return { success: false, reason: "Insufficient Purse!" };
-                    if (player.isOverseas && team.overseasCount >= 8) return { success: false, reason: "OS limit reached!" };
-                    if (team.players.length >= 25) return { success: false, reason: "Squad limit reached!" };
 
                     socket.send(JSON.stringify({ type: 'PLACE_BID', amount: nextAmount }));
                     return { success: true };
@@ -339,10 +340,24 @@ export const useAuctionStore = create()(
             },
 
             getNextBidAmount: (currentAmount, basePrice) => {
+                // IPL Auction Rules:
+                // - Start at base price
+                // - If base price >= 2 Cr (20M), increments are 0.25 Cr (2.5M)
+                // - If base price < 2 Cr, increments are 0.2 Cr (2M) up to 2 Cr, then 0.25 Cr
                 if (!currentAmount || currentAmount < basePrice) return basePrice;
-                if (currentAmount < 50000000) return currentAmount + 2000000;
-                if (currentAmount < 100000000) return currentAmount + 5000000;
-                return currentAmount + 10000000;
+                
+                // If current amount is >= 2 Cr (20M), increment by 0.25 Cr (2.5M)
+                if (currentAmount >= 20000000) {
+                    return currentAmount + 2500000; // 0.25 Cr increment
+                }
+                
+                // If base price >= 2 Cr, always use 0.25 Cr increments
+                if (basePrice >= 20000000) {
+                    return currentAmount + 2500000; // 0.25 Cr increment
+                }
+                
+                // For base price < 2 Cr, increment by 0.2 Cr (2M) until we reach 2 Cr
+                return currentAmount + 2000000; // 0.2 Cr increment
             },
 
             showNotification: (message, type = 'info') => {

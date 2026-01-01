@@ -554,10 +554,19 @@ function handleHammer(code) {
         const state = room.rtmState;
 
         if (state.stage === 'INTENT') {
-            // Stage 1 Expired: Previous team passed automatically
-            room.activity.unshift({ type: 'system', text: `RTM Expired! ${state.previousTeam} passed.` });
-            room.status = 'LIVE';
-            // Fall through to normal sale logic
+            // Stage 1 Expired: Previous team passed automatically - sell to winning team
+            const winningTeamName = state.currentBid.team;
+            const team = room.teams[winningTeamName];
+            const amount = state.currentBid.amount;
+            const purchasedPlayer = { ...state.player, soldPrice: amount, winner: winningTeamName };
+            team.players.push(purchasedPlayer);
+            team.purse -= amount;
+            team.totalSpent += amount;
+            if (state.player.isOverseas) team.overseasCount += 1;
+            room.activity.unshift({ type: 'sold', player: purchasedPlayer, team: winningTeamName, text: `RTM Expired! ${state.previousTeam} passed. Sold to ${winningTeamName}.` });
+            finishRTM(code);
+            saveRooms();
+            return;
         } else if (state.stage === 'HIKE') {
             // Stage 2 Expired: Winner didn't hike, move to final match at current price
             state.newAmount = state.currentBid.amount;
@@ -639,19 +648,34 @@ function handleHammer(code) {
         room.activity.unshift({ type: 'system', text: `${player.name} is UNSOLD!` });
     }
 
+    // Reset bid state for next player - NEW player always starts at base price
     room.currentBid = null;
     room.currentPlayerIndex += 1;
     room.timer = room.timerDuration;
 
-    // Check if next player exists
-    if (room.currentPlayerIndex < room.pool.length) {
-        broadcastRoomUpdate(code);
-        startTimer(code); // AUTO-START NEXT PLAYER
-    } else {
-        room.activity.unshift({ type: 'system', text: 'ALL PLAYERS SOLD! GAME OVER.' });
-        broadcastRoomUpdate(code);
-        // Do not restart timer, game is done.
+    // Check if next player exists and hasn't been sold already
+    while (room.currentPlayerIndex < room.pool.length) {
+        const nextPlayer = room.pool[room.currentPlayerIndex];
+        
+        // Check if this player was already sold (prevent duplicates)
+        const alreadySold = Object.values(room.teams).some(team => 
+            team.players.some(p => (p.id && nextPlayer.id && p.id === nextPlayer.id) || p.name === nextPlayer.name)
+        );
+        
+        if (alreadySold) {
+            // Skip already sold player, move to next
+            room.currentPlayerIndex += 1;
+        } else {
+            // Found valid next player - start timer with base price (no currentBid)
+            broadcastRoomUpdate(code);
+            startTimer(code); // AUTO-START NEXT PLAYER
+            return;
+        }
     }
+    
+    // No more players
+    room.activity.unshift({ type: 'system', text: 'ALL PLAYERS SOLD! GAME OVER.' });
+    broadcastRoomUpdate(code);
 
     saveRooms();
 }
@@ -740,18 +764,35 @@ function broadcastToRoom(code, msg) {
 function finishRTM(code) {
     const room = rooms[code];
     room.status = 'LIVE';
+    // Reset bid state for next player - NEW player always starts at base price
     room.currentBid = null;
     room.currentPlayerIndex += 1;
     room.timer = room.timerDuration;
     delete room.rtmState;
 
-    if (room.currentPlayerIndex < room.pool.length) {
-        broadcastRoomUpdate(code);
-        startTimer(code);
-    } else {
-        room.activity.unshift({ type: 'system', text: 'ALL PLAYERS SOLD! GAME OVER.' });
-        broadcastRoomUpdate(code);
+    // Check if next player exists and hasn't been sold already
+    while (room.currentPlayerIndex < room.pool.length) {
+        const nextPlayer = room.pool[room.currentPlayerIndex];
+        
+        // Check if this player was already sold (prevent duplicates)
+        const alreadySold = Object.values(room.teams).some(team => 
+            team.players.some(p => (p.id && nextPlayer.id && p.id === nextPlayer.id) || p.name === nextPlayer.name)
+        );
+        
+        if (alreadySold) {
+            // Skip already sold player, move to next
+            room.currentPlayerIndex += 1;
+        } else {
+            // Found valid next player - start timer with base price (no currentBid)
+            broadcastRoomUpdate(code);
+            startTimer(code);
+            return;
+        }
     }
+    
+    // No more players
+    room.activity.unshift({ type: 'system', text: 'ALL PLAYERS SOLD! GAME OVER.' });
+    broadcastRoomUpdate(code);
 }
 
 function formatPrice(p) {
